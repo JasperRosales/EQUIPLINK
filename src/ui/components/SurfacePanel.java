@@ -4,12 +4,16 @@ import src.ui.AppTheme;
 
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
-import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 
+/** Soft raised (neumorphic) container. Shadows are painted inside its margin. */
 public class SurfacePanel extends JPanel {
+
+    /** Space reserved around the body for the soft shadows. */
+    public static final int MARGIN = 7;
+    private static final int ARC = 18;
+    private static final float DEPTH = 3.5f;
 
     public SurfacePanel() {
         setOpaque(false);
@@ -19,13 +23,8 @@ public class SurfacePanel extends JPanel {
     @Override
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = (Graphics2D) graphics.create();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setColor(new Color(15, 23, 42, AppTheme.isDarkMode() ? 0 : 10));
-        g.fillRoundRect(0, 1, getWidth(), getHeight() - 1, 12, 12);
-        g.setColor(AppTheme.surface());
-        g.fillRoundRect(0, 0, getWidth(), getHeight() - 1, 12, 12);
-        g.setColor(AppTheme.border());
-        g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 2, 12, 12);
+        Neu.raised(g, MARGIN, MARGIN, getWidth() - MARGIN * 2, getHeight() - MARGIN * 2,
+                ARC, DEPTH, AppTheme.surface());
         g.dispose();
         super.paintComponent(graphics);
     }

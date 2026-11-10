@@ -158,7 +158,7 @@ public class EquipmentInventoryPanel extends JPanel {
         if (isCatalog()) {
             SurfacePanel selectionBar = new SurfacePanel();
             selectionBar.setLayout(new BorderLayout(12, 0));
-            selectionBar.setBorder(new EmptyBorder(10, 16, 10, 12));
+            selectionBar.setBorder(new EmptyBorder(13, 18, 13, 14));
             selectionLabel.setFont(AppTheme.semibold(12));
             selectionLabel.setForeground(AppTheme.foreground());
             selectionBar.add(selectionLabel, BorderLayout.CENTER);

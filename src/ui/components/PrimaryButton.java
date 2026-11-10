@@ -10,8 +10,6 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 
 public class PrimaryButton extends JButton {
 
@@ -19,9 +17,12 @@ public class PrimaryButton extends JButton {
         PRIMARY, SECONDARY, DANGER
     }
 
+    private static final int MARGIN = 3;
+    private static final int ARC = 14;
+
     private final Style style;
-    private boolean hovered;
-    private boolean pressed;
+    private final Tween hover = new Tween(this, 150);
+    private final Tween press = new Tween(this, 90);
 
     public PrimaryButton(String text) {
         this(text, Style.PRIMARY);
@@ -32,68 +33,64 @@ public class PrimaryButton extends JButton {
         this.style = style;
         setFont(AppTheme.semibold(12.5f));
         setForeground(style == Style.SECONDARY ? AppTheme.foreground() : Color.WHITE);
-        setBorder(new EmptyBorder(9, 16, 9, 16));
+        setBorder(new EmptyBorder(10, 18, 10, 18));
         setFocusPainted(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
         setOpaque(false);
+        setRolloverEnabled(true);
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent event) {
-                hovered = true;
-                repaint();
-            }
-
-            @Override
-            public void mouseExited(MouseEvent event) {
-                hovered = false;
-                pressed = false;
-                repaint();
-            }
-
-            @Override
-            public void mousePressed(MouseEvent event) {
-                pressed = true;
-                repaint();
-            }
-
-            @Override
-            public void mouseReleased(MouseEvent event) {
-                pressed = false;
-                repaint();
-            }
+        getModel().addChangeListener(event -> {
+            hover.to(getModel().isRollover() && isEnabled() ? 1f : 0f);
+            press.to(getModel().isArmed() && getModel().isPressed() ? 1f : 0f);
         });
     }
 
     @Override
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = (Graphics2D) graphics.create();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        Neu.antialias(g);
+        int x = MARGIN;
+        int y = MARGIN;
+        int w = getWidth() - MARGIN * 2;
+        int h = getHeight() - MARGIN * 2;
+        float hv = hover.value();
+        float pr = press.value();
 
-        int inset = 1;
-        int arc = 10;
-        Color base = baseColor();
-        if (pressed) {
-            base = base.darker();
-        } else if (hovered && style != Style.SECONDARY) {
-            base = darken(base);
-        }
-
-        g.setColor(isEnabled() ? base : AppTheme.border());
-        g.fillRoundRect(inset, inset, getWidth() - inset * 2, getHeight() - inset * 2, arc, arc);
-        if (style == Style.SECONDARY) {
+        if (!isEnabled()) {
             g.setColor(AppTheme.border());
-            g.drawRoundRect(inset, inset, getWidth() - inset * 2 - 1,
-                    getHeight() - inset * 2 - 1, arc, arc);
-        }
-        if (hovered && style == Style.SECONDARY) {
-            g.setColor(new Color(AppTheme.primary().getRed(), AppTheme.primary().getGreen(),
-                    AppTheme.primary().getBlue(), 24));
-            g.fillRoundRect(inset, inset, getWidth() - inset * 2, getHeight() - inset * 2, arc, arc);
+            g.fillRoundRect(x, y, w, h, ARC, ARC);
+        } else if (style == Style.SECONDARY) {
+            if (pr > 0.4f) {
+                Neu.inset(g, x, y, w, h, ARC, 2.6f * pr, AppTheme.surface());
+            } else {
+                Neu.raised(g, x, y, w, h, ARC, 1.6f + 0.8f * hv, AppTheme.surface());
+            }
+            if (hv > 0f) {
+                g.setColor(AppTheme.alpha(AppTheme.primary(), Math.round(18 * hv)));
+                g.fillRoundRect(x, y, w, h, ARC, ARC);
+            }
+        } else {
+            Color base = baseColor();
+            Color top = AppTheme.mix(base, Color.WHITE, 0.16f + 0.06f * hv);
+            Color bottom = AppTheme.mix(base, Color.BLACK, 0.06f + 0.10f * pr);
+            float depth = (1.6f + 1.0f * hv) * (1f - pr);
+            Neu.raised(g, x, y, w, h, ARC, depth, base);
+            g.setPaint(new GradientPaint(0, y, top, 0, y + h, bottom));
+            g.fillRoundRect(x, y, w, h, ARC, ARC);
+            // Soft gloss along the top edge.
+            g.setColor(AppTheme.alpha(Color.WHITE, Math.round(40 + 25 * hv)));
+            g.drawRoundRect(x, y, w - 1, h - 1, ARC, ARC);
         }
         g.dispose();
-        super.paintComponent(graphics);
+        if (pr > 0f) {
+            Graphics2D text = (Graphics2D) graphics.create();
+            text.translate(0, Math.round(pr));
+            super.paintComponent(text);
+            text.dispose();
+        } else {
+            super.paintComponent(graphics);
+        }
     }
 
     private Color baseColor() {
@@ -106,18 +103,5 @@ public class PrimaryButton extends JButton {
             default:
                 return AppTheme.primary();
         }
-    }
-
-    private Color darken(Color color) {
-        return new Color(Math.max(0, color.getRed() - 18), Math.max(0, color.getGreen() - 18),
-                Math.max(0, color.getBlue() - 18), color.getAlpha());
-    }
-
-    private Color brighten(Color color) {
-        return new Color(
-                Math.min(255, color.getRed() + 14),
-                Math.min(255, color.getGreen() + 14),
-                Math.min(255, color.getBlue() + 14),
-                color.getAlpha());
     }
 }

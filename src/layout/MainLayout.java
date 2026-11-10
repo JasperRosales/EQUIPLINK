@@ -129,7 +129,7 @@ public class MainLayout extends JPanel {
                 mainPanel = new JPanel(new BorderLayout());
                 mainPanel.setBackground(AppTheme.background());
                 header = new JPanel(new BorderLayout(18, 0));
-                header.setBackground(AppTheme.surface());
+                header.setBackground(AppTheme.background());
                 header.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                                 javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
                                 new EmptyBorder(14, 30, 14, 28)));
@@ -183,7 +183,7 @@ public class MainLayout extends JPanel {
                 name.setForeground(Color.WHITE);
                 JLabel tagline = new JLabel("Campus Equipment System");
                 tagline.setFont(AppTheme.regular(10));
-                tagline.setForeground(new Color(148, 163, 184));
+                tagline.setForeground(AppTheme.sidebarMuted());
                 brandText.add(name);
                 brandText.add(tagline);
                 brand.add(logo, BorderLayout.WEST);
@@ -193,7 +193,7 @@ public class MainLayout extends JPanel {
 
                 JLabel menuLabel = new JLabel("MENU");
                 menuLabel.setFont(AppTheme.semibold(10));
-                menuLabel.setForeground(new Color(100, 116, 139));
+                menuLabel.setForeground(AppTheme.sidebarMuted());
                 menuLabel.setBorder(new EmptyBorder(0, 14, 8, 0));
                 menuLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
                 menuLabel.setAlignmentX(LEFT_ALIGNMENT);
@@ -223,10 +223,10 @@ public class MainLayout extends JPanel {
                 profile.setBackground(AppTheme.sidebar());
                 profile.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                                 javax.swing.BorderFactory.createMatteBorder(
-                                                1, 0, 0, 0, new Color(30, 41, 59)),
+                                                1, 0, 0, 0, AppTheme.sidebarDivider()),
                                 new EmptyBorder(14, 18, 16, 16)));
                 JLabel initials = new src.ui.components.Avatar(
-                                initials(name), new Color(51, 65, 85), 999);
+                                initials(name), AppTheme.sidebarShadowLight(), 999);
                 initials.setFont(AppTheme.semibold(11));
                 initials.setPreferredSize(new Dimension(36, 36));
 
@@ -238,7 +238,7 @@ public class MainLayout extends JPanel {
                 profileName.setForeground(Color.WHITE);
                 JLabel profileRole = new JLabel(role);
                 profileRole.setFont(AppTheme.regular(10.5f));
-                profileRole.setForeground(new Color(148, 163, 184));
+                profileRole.setForeground(AppTheme.sidebarMuted());
                 identity.add(profileName);
                 identity.add(Box.createVerticalStrut(3));
                 identity.add(profileRole);
@@ -248,7 +248,7 @@ public class MainLayout extends JPanel {
                 JButton logout = new JButton("Log out");
                 logout.setToolTipText("Log out");
                 logout.setFont(AppTheme.semibold(10.5f));
-                logout.setForeground(new Color(203, 213, 225));
+                logout.setForeground(AppTheme.sidebarText());
                 logout.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
                 logout.setIconTextGap(4);
                 logout.setBorder(new EmptyBorder(3, 0, 3, 0));
@@ -363,7 +363,8 @@ public class MainLayout extends JPanel {
                 pageDescription.setText(pageDescriptionFor(item));
                 setActiveNavigation(navigationItemFor(item));
                 pageContainer.removeAll();
-                pageContainer.add(UiSupport.scroll(createPage(item)), BorderLayout.CENTER);
+                pageContainer.add(new src.ui.components.FadeInPanel(
+                                UiSupport.scroll(createPage(item))), BorderLayout.CENTER);
                 pageContainer.revalidate();
                 pageContainer.repaint();
         }
@@ -498,7 +499,8 @@ public class MainLayout extends JPanel {
                 pageDescription.setText(items.size() + " item(s) added from Available Equipment");
                 setActiveNavigation("Request Equipment");
                 pageContainer.removeAll();
-                pageContainer.add(UiSupport.scroll(requestForm(null, items)), BorderLayout.CENTER);
+                pageContainer.add(new src.ui.components.FadeInPanel(
+                                UiSupport.scroll(requestForm(null, items))), BorderLayout.CENTER);
                 pageContainer.revalidate();
                 pageContainer.repaint();
         }
@@ -509,7 +511,8 @@ public class MainLayout extends JPanel {
                 pageDescription.setText("Update details for " + request.getRequestCode());
                 setActiveNavigation("My Requests");
                 pageContainer.removeAll();
-                pageContainer.add(UiSupport.scroll(requestForm(request)), BorderLayout.CENTER);
+                pageContainer.add(new src.ui.components.FadeInPanel(
+                                UiSupport.scroll(requestForm(request))), BorderLayout.CENTER);
                 pageContainer.revalidate();
                 pageContainer.repaint();
         }
@@ -589,13 +592,12 @@ public class MainLayout extends JPanel {
 
         private void applyTheme() {
                 Color background = AppTheme.background();
-                Color surface = AppTheme.surface();
                 setBackground(background);
                 sidebar.setBackground(AppTheme.sidebar());
                 sidebar.setBorder(null);
                 mainPanel.setBackground(background);
                 pageContainer.setBackground(background);
-                header.setBackground(surface);
+                header.setBackground(background);
                 header.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                                 javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
                                 new EmptyBorder(14, 30, 14, 28)));
@@ -622,7 +624,8 @@ public class MainLayout extends JPanel {
                 pageDescription.setText(description);
                 setActiveNavigation(navigationItemFor(title));
                 pageContainer.removeAll();
-                pageContainer.add(UiSupport.scroll(content), BorderLayout.CENTER);
+                pageContainer.add(new src.ui.components.FadeInPanel(
+                                UiSupport.scroll(content)), BorderLayout.CENTER);
                 pageContainer.revalidate();
                 pageContainer.repaint();
         }

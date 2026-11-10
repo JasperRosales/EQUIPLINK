@@ -39,7 +39,7 @@ public class AuthBrandPanel extends JPanel {
         add(Box.createVerticalGlue());
         JLabel eyebrow = new JLabel("CAMPUS EQUIPMENT, SIMPLIFIED");
         eyebrow.setFont(AppTheme.semibold(10.5f));
-        eyebrow.setForeground(new Color(147, 197, 253));
+        eyebrow.setForeground(AppTheme.PRIMARY_LIGHT);
         eyebrow.setAlignmentX(LEFT_ALIGNMENT);
         add(eyebrow);
         add(Box.createVerticalStrut(14));
@@ -54,14 +54,14 @@ public class AuthBrandPanel extends JPanel {
         JLabel description = new JLabel(
                 "<html><div style='width:300px;line-height:1.55'>" + subtitle + "</div></html>");
         description.setFont(AppTheme.regular(13));
-        description.setForeground(new Color(203, 213, 225));
+        description.setForeground(AppTheme.sidebarText());
         description.setAlignmentX(LEFT_ALIGNMENT);
         add(description);
         add(Box.createVerticalGlue());
 
         JLabel footer = new JLabel("One campus. Shared resources. Easier borrowing.");
         footer.setFont(AppTheme.regular(11));
-        footer.setForeground(new Color(148, 163, 184));
+        footer.setForeground(AppTheme.sidebarMuted());
         footer.setAlignmentX(LEFT_ALIGNMENT);
         add(footer);
     }
@@ -71,8 +71,8 @@ public class AuthBrandPanel extends JPanel {
         Graphics2D g = (Graphics2D) graphics.create();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setPaint(new GradientPaint(
-                0, 0, new Color(15, 23, 42),
-                0, getHeight(), new Color(23, 37, 84)));
+                0, 0, AppTheme.sidebar(),
+                0, getHeight(), AppTheme.mix(AppTheme.sidebar(), AppTheme.PRIMARY_DARK, 0.45f)));
         g.fillRect(0, 0, getWidth(), getHeight());
         g.setColor(new Color(255, 255, 255, 8));
         for (int x = 24; x < getWidth(); x += 24) {

@@ -27,26 +27,19 @@ public class ForgotPasswordDialog extends JDialog {
     // EQUIPLINK 3D SOFT REALISM COLORS
     // =========================================
 
-    private static final Color BACKGROUND_TOP =
-            new Color(239, 245, 253);
+    private static final Color BACKGROUND_TOP = AppTheme.mix(AppTheme.LIGHT_BG, Color.WHITE, 0.4f);
 
-    private static final Color BACKGROUND_BOTTOM =
-            new Color(220, 231, 247);
+    private static final Color BACKGROUND_BOTTOM = AppTheme.LIGHT_BG_DEEP;
 
-    private static final Color NAVY =
-            new Color(28, 49, 82);
+    private static final Color NAVY = AppTheme.INK;
 
-    private static final Color MUTED =
-            new Color(112, 130, 155);
+    private static final Color MUTED = AppTheme.INK_MUTED;
 
-    private static final Color PRIMARY =
-            new Color(52, 112, 190);
+    private static final Color PRIMARY = AppTheme.PRIMARY;
 
-    private static final Color PRIMARY_DARK =
-            new Color(34, 83, 148);
+    private static final Color PRIMARY_DARK = AppTheme.PRIMARY_DARK;
 
-    private static final Color BORDER =
-            new Color(207, 219, 236);
+    private static final Color BORDER = AppTheme.LIGHT_BORDER;
 
     // =========================================
     // CONSTRUCTOR
@@ -341,7 +334,7 @@ public class ForgotPasswordDialog extends JDialog {
             if (hasFocus()) {
 
                 g2.setColor(
-                        new Color(65, 135, 215, 150)
+                        AppTheme.alpha(AppTheme.PRIMARY, 150)
                 );
 
                 g2.setStroke(new BasicStroke(1.5f));
@@ -438,7 +431,7 @@ public class ForgotPasswordDialog extends JDialog {
             if (hasFocus()) {
 
                 g2.setColor(
-                        new Color(65, 135, 215, 150)
+                        AppTheme.alpha(AppTheme.PRIMARY, 150)
                 );
 
                 g2.setStroke(new BasicStroke(1.5f));
@@ -522,7 +515,7 @@ public class ForgotPasswordDialog extends JDialog {
 
                 g2.setColor(
                         primary
-                                ? new Color(25, 66, 125, 100)
+                                ? AppTheme.alpha(AppTheme.PRIMARY_DARK, 100)
                                 : new Color(139, 158, 184, 100)
                 );
 
@@ -546,12 +539,12 @@ public class ForgotPasswordDialog extends JDialog {
             } else if (primary) {
 
                 top = hovered
-                        ? new Color(78, 139, 210)
-                        : new Color(67, 127, 196);
+                        ? AppTheme.PRIMARY_LIGHT
+                        : AppTheme.PRIMARY;
 
                 bottom = pressed
                         ? PRIMARY_DARK
-                        : new Color(43, 96, 163);
+                        : AppTheme.PRIMARY_DARK;
 
             } else {
 
@@ -583,7 +576,7 @@ public class ForgotPasswordDialog extends JDialog {
             // Surface outline
             g2.setColor(
                     primary
-                            ? new Color(30, 83, 149)
+                            ? AppTheme.PRIMARY_DARK
                             : new Color(211, 224, 241)
             );
 
@@ -670,7 +663,7 @@ public class ForgotPasswordDialog extends JDialog {
             );
 
             g2.setColor(
-                    new Color(105, 151, 208, 35)
+                    AppTheme.alpha(AppTheme.PRIMARY_LIGHT, 35)
             );
 
             g2.fillOval(

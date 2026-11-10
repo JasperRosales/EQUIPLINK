@@ -34,23 +34,17 @@ public class PasswordChangeDialog extends JDialog {
     // GLASSMORPHISM COLORS
     // =========================================
 
-    private static final Color NAVY =
-            new Color(28, 49, 82);
+    private static final Color NAVY = AppTheme.INK;
 
-    private static final Color MUTED =
-            new Color(112, 130, 155);
+    private static final Color MUTED = AppTheme.INK_MUTED;
 
-    private static final Color PRIMARY =
-            new Color(52, 112, 190);
+    private static final Color PRIMARY = AppTheme.PRIMARY;
 
-    private static final Color BORDER =
-            new Color(207, 219, 236);
+    private static final Color BORDER = AppTheme.LIGHT_BORDER;
 
-    private static final Color BACKGROUND_TOP =
-            new Color(239, 246, 255);
+    private static final Color BACKGROUND_TOP = AppTheme.mix(AppTheme.LIGHT_BG, Color.WHITE, 0.4f);
 
-    private static final Color BACKGROUND_BOTTOM =
-            new Color(218, 232, 249);
+    private static final Color BACKGROUND_BOTTOM = AppTheme.LIGHT_BG_DEEP;
 
     // =========================================
     // CONSTRUCTOR
@@ -416,7 +410,7 @@ public class PasswordChangeDialog extends JDialog {
             if (hasFocus()) {
 
                 g2.setColor(
-                        new Color(65, 135, 215, 155)
+                        AppTheme.alpha(AppTheme.PRIMARY, 155)
                 );
 
                 g2.setStroke(
@@ -498,7 +492,7 @@ public class PasswordChangeDialog extends JDialog {
 
             // Decorative bottom circle
             g2.setColor(
-                    new Color(90, 145, 210, 30)
+                    AppTheme.alpha(AppTheme.PRIMARY_LIGHT, 30)
             );
 
             g2.fillOval(

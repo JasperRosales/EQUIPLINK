@@ -31,8 +31,7 @@ public class LoginFrame extends JFrame {
     private static final Color INPUT_BACKGROUND =
             new Color(255, 255, 255, 235);
 
-    private static final Color NAVY =
-            new Color(15, 23, 42);
+    private static final Color NAVY = AppTheme.INK;
 
     public LoginFrame(
             AuthController authController,
@@ -419,13 +418,9 @@ public class LoginFrame extends JFrame {
             int width = getWidth();
             int height = getHeight();
 
-            int arc = 16;
-            g2.setColor(new Color(15, 23, 42, 12));
-            g2.fillRoundRect(4, 7, width - 9, height - 10, arc, arc);
-            g2.setColor(AppTheme.surface());
-            g2.fillRoundRect(4, 4, width - 9, height - 10, arc, arc);
-            g2.setColor(AppTheme.border());
-            g2.drawRoundRect(4, 4, width - 9, height - 10, arc, arc);
+            int arc = 24;
+            src.ui.components.Neu.raised(g2, 6, 6, width - 12, height - 12, arc, 5f,
+                    AppTheme.surface());
 
             g2.dispose();
 
