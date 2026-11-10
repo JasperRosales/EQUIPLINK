@@ -23,16 +23,10 @@ public class AuthBrandPanel extends JPanel {
         JPanel logo = new JPanel();
         logo.setOpaque(false);
         logo.setLayout(new BoxLayout(logo, BoxLayout.X_AXIS));
-        javax.swing.ImageIcon mark = src.ui.BrandLogo.icon(40);
-        JLabel badge;
-        if (mark != null) {
-            badge = new JLabel(mark);
-        } else {
-            badge = new Avatar("EL", AppTheme.primary(), 10);
-            badge.setFont(AppTheme.semibold(13));
-            badge.setPreferredSize(new java.awt.Dimension(38, 38));
-            badge.setMaximumSize(new java.awt.Dimension(38, 38));
-        }
+        JLabel badge = new Avatar("EL", AppTheme.primary(), 10);
+        badge.setFont(AppTheme.semibold(13));
+        badge.setPreferredSize(new java.awt.Dimension(38, 38));
+        badge.setMaximumSize(new java.awt.Dimension(38, 38));
         JLabel brand = new JLabel("EquipLink");
         brand.setFont(AppTheme.semibold(18));
         brand.setForeground(Color.WHITE);
