@@ -88,13 +88,37 @@ public class AuthService {
                     "Please complete all required fields. Password must be at least 8 characters.");
         }
 
+        if (!email.trim().matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
+            throw new IllegalArgumentException("Enter a valid email address.");
+        }
+
         if (!"STUDENT".equalsIgnoreCase(borrowerType)) {
 
             throw new IllegalArgumentException(
                     "Self-registration is for students. Faculty accounts are created by ICT.");
         }
 
-        insertBorrower(username, email, fullName, department, "STUDENT", password);
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT 1 FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1")) {
+            statement.setString(1, email.trim());
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    throw new IllegalArgumentException(
+                            "An account already exists for this GSuite account.");
+                }
+            }
+        }
+
+        try {
+            insertBorrower(username, email, fullName, department, "STUDENT", password);
+        } catch (java.sql.SQLException exception) {
+            if ("23505".equals(exception.getSQLState())) {
+                throw new IllegalArgumentException(
+                        "That username or email is already in use.");
+            }
+            throw exception;
+        }
     }
 
     /** ICT creates faculty accounts, which receive priority request handling. */

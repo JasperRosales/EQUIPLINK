@@ -322,24 +322,48 @@ public class EquipmentInventoryPanel extends JPanel {
     }
 
     private JPanel equipmentCard(Equipment item) {
-        SurfacePanel card = new SurfacePanel();
+        final float[] hover = {0f};
+        SurfacePanel card = new SurfacePanel() {
+            @Override
+            protected void paintBorder(java.awt.Graphics graphics) {
+                super.paintBorder(graphics);
+                if (hover[0] <= 0f) {
+                    return;
+                }
+                java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
+                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(AppTheme.alpha(new java.awt.Color(0, 0, 128),
+                        Math.round(255 * hover[0])));
+                g.setStroke(new java.awt.BasicStroke(2f));
+                int m = SurfacePanel.MARGIN;
+                g.drawRoundRect(m, m, getWidth() - m * 2 - 1, getHeight() - m * 2 - 1, 18, 18);
+                g.dispose();
+            }
+        };
         card.setLayout(new BorderLayout(14, 8));
-        java.awt.Color baseBackground = card.getBackground();
+        javax.swing.Timer timer = new javax.swing.Timer(15, null);
+        timer.addActionListener(event -> {
+            boolean inside = card.getMousePosition() != null;
+            float target = inside ? 1f : 0f;
+            float step = 15f / 200f;
+            if (Math.abs(hover[0] - target) <= step) {
+                hover[0] = target;
+                timer.stop();
+            } else {
+                hover[0] += hover[0] < target ? step : -step;
+            }
+            card.repaint();
+        });
         card.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseEntered(java.awt.event.MouseEvent event) {
-                card.setBackground(new java.awt.Color(0, 0, 128));
-                card.repaint();
+                if (!timer.isRunning()) timer.start();
             }
 
             @Override
             public void mouseExited(java.awt.event.MouseEvent event) {
-                java.awt.Point point = card.getMousePosition();
-                if (point != null && card.contains(point)) {
-                    return;
-                }
-                card.setBackground(baseBackground);
-                card.repaint();
+                if (!timer.isRunning()) timer.start();
             }
         });
         boolean usable = "AVAILABLE".equals(item.getStatus());
