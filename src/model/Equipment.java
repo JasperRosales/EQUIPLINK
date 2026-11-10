@@ -12,6 +12,7 @@ public class Equipment {
     private final int availableQuantity;
     private final String status;
     private final String custodianRole;
+    private final int inUseQuantity;
 
     public Equipment(
             long equipmentId,
@@ -24,6 +25,23 @@ public class Equipment {
             int availableQuantity,
             String status,
             String custodianRole) {
+        this(equipmentId, equipmentCode, equipmentName, category, totalQuantity,
+                damagedQuantity, lostQuantity, availableQuantity, status, custodianRole, 0);
+    }
+
+    public Equipment(
+            long equipmentId,
+            String equipmentCode,
+            String equipmentName,
+            String category,
+            int totalQuantity,
+            int damagedQuantity,
+            int lostQuantity,
+            int availableQuantity,
+            String status,
+            String custodianRole,
+            int inUseQuantity) {
+        this.inUseQuantity = inUseQuantity;
 
         this.equipmentId = equipmentId;
         this.equipmentCode = equipmentCode;
@@ -47,4 +65,6 @@ public class Equipment {
     public int getAvailableQuantity() { return availableQuantity; }
     public String getStatus() { return status; }
     public String getCustodianRole() { return custodianRole; }
+    /** Units released to borrowers and not yet returned. */
+    public int getInUseQuantity() { return inUseQuantity; }
 }

@@ -292,19 +292,19 @@ public class MainLayout extends JPanel {
                 switch (normalizeRole(role)) {
                         case "BORROWER":
                                 return new String[] {
-                                                "Dashboard", "Request Equipment", "My Requests",
+                                                "Dashboard", "Available Equipment", "Request Equipment", "My Requests",
                                                 "Borrowing Request", "Notifications", "Settings"
                                 };
                         case "ICT_STAFF":
                                 return new String[] {
-                                                "Dashboard", "Equipment", "Requests",
+                                                "Dashboard", "Inventory", "Requests",
                                                 "Schedule & Assignment", "Transaction History",
                                                 "Password Requests", "User Management",
                                                 "All Requests", "Notifications", "Settings"
                                 };
                         case "FACILITY_STAFF":
                                 return new String[] {
-                                                "Dashboard", "Equipment", "Requests",
+                                                "Dashboard", "Inventory", "Requests",
                                                 "Schedule & Assignment", "Transaction History",
                                                 "Notifications", "Settings"
                                 };
@@ -416,6 +416,10 @@ public class MainLayout extends JPanel {
                                                 enabled -> notificationsEnabled = enabled);
                         case "Notifications":
                                 return new NotificationsPanel(user.getUserId(), notificationController);
+                        case "Available Equipment":
+                                return new EquipmentInventoryPanel(
+                                                user, equipmentController, this::requestItems);
+                        case "Inventory":
                         case "Equipment":
                                 return new EquipmentInventoryPanel(user, equipmentController);
                         case "Requests":
@@ -475,9 +479,26 @@ public class MainLayout extends JPanel {
         }
 
         private EquipmentRequestPanel requestForm(BorrowRequest request) {
+                return requestForm(request, java.util.List.of());
+        }
+
+        private EquipmentRequestPanel requestForm(
+                        BorrowRequest request, java.util.List<src.model.EquipmentRequestItem> items) {
                 return new EquipmentRequestPanel(
                                 user, requestController, equipmentController, request,
-                                () -> showPage("My Requests"));
+                                () -> showPage("My Requests"), items);
+        }
+
+        /** Opens the request form prefilled with items picked from Available Equipment. */
+        private void requestItems(java.util.List<src.model.EquipmentRequestItem> items) {
+                currentPage = "Request Equipment";
+                pageTitle.setText("Request Equipment");
+                pageDescription.setText(items.size() + " item(s) added from Available Equipment");
+                setActiveNavigation("Request Equipment");
+                pageContainer.removeAll();
+                pageContainer.add(UiSupport.scroll(requestForm(null, items)), BorderLayout.CENTER);
+                pageContainer.revalidate();
+                pageContainer.repaint();
         }
 
         private void editRequest(BorrowRequest request) {
@@ -522,6 +543,10 @@ public class MainLayout extends JPanel {
                                 return "Overview of your EquipLink activity";
                         case "Request Equipment":
                                 return "Create a request using live campus inventory";
+                        case "Available Equipment":
+                                return "Browse items on hand and request several at once";
+                        case "Inventory":
+                                return "Live stock for your equipment group";
                         case "My Requests":
                                 return "Track pending requests and equipment you have borrowed";
                         case "Pending Requests":

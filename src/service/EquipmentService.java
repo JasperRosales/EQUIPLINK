@@ -5,11 +5,9 @@ import src.model.Equipment;
 import src.model.User;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Time;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,31 +41,8 @@ public class EquipmentService {
         String normalizedRole = requireCustodianRole(role);
         List<Equipment> equipment = new ArrayList<>();
         try (Connection connection = Database.getConnection();
-                PreparedStatement statement = connection.prepareStatement("""
-                        SELECT e.equipment_id, e.equipment_code, e.equipment_name,
-                               e.category, e.total_quantity, e.damaged_quantity,
-                               e.lost_quantity, e.status, e.custodian_role,
-                               GREATEST(e.total_quantity - e.damaged_quantity - e.lost_quantity
-                                   - COALESCE((
-                                       SELECT SUM(
-                                           CASE
-                                               WHEN br.status = 'RELEASED'
-                                                   THEN GREATEST(ri.released_quantity - ri.returned_quantity, 0)
-                                               WHEN br.status = 'APPROVED' AND ri.assigned_quantity > 0
-                                                   THEN GREATEST(ri.assigned_quantity - ri.returned_quantity, 0)
-                                               ELSE ri.requested_quantity
-                                           END
-                                       )
-                                       FROM request_items ri
-                                       JOIN borrow_requests br ON br.request_id = ri.request_id
-                                       JOIN request_groups rg ON rg.group_id = ri.group_id
-                                       WHERE ri.requested_equipment_id = e.equipment_id
-                                         AND br.status IN (
-                                             'PENDING_STAFF', 'NEEDS_ACTION', 'PENDING_ADMIN',
-                                             'PENDING_DIRECTOR', 'APPROVED', 'RELEASED'
-                                         )
-                                         AND rg.status NOT IN ('UNABLE', 'CANCELLED', 'NOT_REQUIRED')
-                                   ), 0), 0) AS available_quantity
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT " + EQUIPMENT_COLUMNS + """
                         FROM equipment e
                         WHERE e.active = TRUE AND e.custodian_role = ?
                         ORDER BY e.category, e.equipment_name, e.equipment_code
@@ -247,69 +222,58 @@ public class EquipmentService {
             java.time.LocalDate eventDate,
             java.time.LocalTime startTime,
             java.time.LocalTime endTime) throws SQLException {
-        String overlapFilter = eventDate == null ? "" : """
-                                  AND (
-                                      br.status = 'RELEASED'
-                                      OR (
-                                          br.event_date = ?
-                                          AND br.start_time < ?
-                                          AND br.end_time > ?
-                                      )
-                                  )
-                """;
-        String sql = """
-                SELECT e.equipment_id, e.equipment_code, e.equipment_name,
-                       e.category, e.total_quantity, e.damaged_quantity,
-                       e.lost_quantity, e.status, e.custodian_role,
-                       GREATEST(
-                           e.total_quantity - e.damaged_quantity - e.lost_quantity
-                           - COALESCE((
-                               SELECT SUM(
-                                   CASE
-                                       WHEN br.status = 'RELEASED'
-                                           THEN GREATEST(ri.released_quantity - ri.returned_quantity, 0)
-                                       WHEN br.status = 'APPROVED' AND ri.assigned_quantity > 0
-                                           THEN GREATEST(ri.assigned_quantity - ri.returned_quantity, 0)
-                                       ELSE ri.requested_quantity
-                                   END
-                               )
-                               FROM request_items ri
-                               JOIN borrow_requests br ON br.request_id = ri.request_id
-                               JOIN request_groups rg ON rg.group_id = ri.group_id
-                               WHERE ri.requested_equipment_id = e.equipment_id
-                                 AND br.status IN (
-                                     'PENDING_STAFF', 'NEEDS_ACTION', 'PENDING_ADMIN',
-                                     'PENDING_DIRECTOR', 'APPROVED', 'RELEASED'
-                                 )
-                                 AND rg.status NOT IN ('UNABLE', 'CANCELLED', 'NOT_REQUIRED')
-                                 AND br.request_id <> ?
-                %s
-                           ), 0),
-                           0
-                       ) AS available_quantity
+        // Stock is only deducted when staff confirm the release after final approval,
+        // so pending requests and schedules no longer reduce what borrowers see.
+        String sql = "SELECT " + EQUIPMENT_COLUMNS + """
                 FROM equipment e
                 WHERE e.active = TRUE
                 ORDER BY e.category, e.equipment_name, e.equipment_code
-                """.formatted(overlapFilter);
-
+                """;
         List<Equipment> equipment = new ArrayList<>();
         try (Connection connection = Database.getConnection();
-                PreparedStatement statement = connection.prepareStatement(sql)) {
-            bindAvailabilityFilter(statement, excludedRequestId, eventDate, startTime, endTime);
-            try (ResultSet result = statement.executeQuery()) {
-                while (result.next()) {
-                    Equipment item = mapEquipment(result);
-                    if (includeUnavailable
-                            || ("AVAILABLE".equals(item.getStatus())
-                                    && item.getAvailableQuantity() > 0)) {
-                        equipment.add(item);
-                    }
+                PreparedStatement statement = connection.prepareStatement(sql);
+                ResultSet result = statement.executeQuery()) {
+            while (result.next()) {
+                Equipment item = mapEquipment(result);
+                if (includeUnavailable
+                        || ("AVAILABLE".equals(item.getStatus())
+                                && item.getAvailableQuantity() > 0)) {
+                    equipment.add(item);
                 }
             }
         }
         return equipment;
     }
 
+    /** Units currently out with borrowers (released and not yet returned). */
+    private static final String IN_USE_SQL = """
+            COALESCE((
+                SELECT SUM(GREATEST(ri.released_quantity - ri.returned_quantity
+                        - ri.missing_quantity, 0))
+                FROM request_items ri
+                JOIN request_groups rg ON rg.group_id = ri.group_id
+                WHERE ri.assigned_equipment_id = e.equipment_id
+                  AND rg.status = 'RELEASED'
+            ), 0)
+            """;
+
+    /** Units on hand: usable stock minus units currently released to borrowers. */
+    private static final String ON_HAND_SQL =
+            "GREATEST(e.total_quantity - e.damaged_quantity - e.lost_quantity - "
+                    + IN_USE_SQL + ", 0)";
+
+    private static final String EQUIPMENT_COLUMNS = """
+            e.equipment_id, e.equipment_code, e.equipment_name,
+            e.category, e.total_quantity, e.damaged_quantity,
+            e.lost_quantity, e.status, e.custodian_role,
+            """ + ON_HAND_SQL + " AS available_quantity, "
+            + IN_USE_SQL + " AS in_use_quantity\n";
+
+    /**
+     * Units on hand for one item. Inventory is deducted only when staff release
+     * equipment after the campus director's approval; the schedule arguments are
+     * kept for compatibility and no longer reserve stock.
+     */
     public static int findAvailableQuantity(
             Connection connection,
             long equipmentId,
@@ -317,79 +281,14 @@ public class EquipmentService {
             java.time.LocalDate eventDate,
             java.time.LocalTime startTime,
             java.time.LocalTime endTime) throws SQLException {
-        String overlapFilter = eventDate == null ? "" : """
-                          AND (
-                              br.status = 'RELEASED'
-                              OR (
-                                  br.event_date = ?
-                                  AND br.start_time < ?
-                                  AND br.end_time > ?
-                              )
-                          )
-                """;
-        String sql = """
-                SELECT GREATEST(
-                    e.total_quantity - e.damaged_quantity - e.lost_quantity
-                    - COALESCE((
-                        SELECT SUM(
-                            CASE
-                                WHEN rg.status IN ('RELEASED', 'RETURNED')
-                                    THEN GREATEST(ri.released_quantity - ri.returned_quantity
-                                            - ri.missing_quantity, 0)
-                                WHEN rg.status = 'ASSIGNED'
-                                    THEN ri.assigned_quantity
-                                ELSE ri.requested_quantity
-                            END
-                        )
-                        FROM request_items ri
-                        JOIN borrow_requests br ON br.request_id = ri.request_id
-                        JOIN request_groups rg ON rg.group_id = ri.group_id
-                        WHERE ri.requested_equipment_id = e.equipment_id
-                          AND br.status IN (
-                              'PENDING_STAFF', 'NEEDS_ACTION', 'PENDING_ADMIN',
-                              'PENDING_DIRECTOR', 'APPROVED', 'RELEASED'
-                          )
-                          AND rg.status NOT IN ('UNABLE', 'CANCELLED', 'NOT_REQUIRED')
-                          AND br.request_id <> ?
-                %s
-                    ), 0),
-                    0
-                ) AS available_quantity
-                FROM equipment e
-                WHERE e.equipment_id = ? AND e.active = TRUE
-                """.formatted(overlapFilter);
-
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            int nextParameter = bindAvailabilityFilter(
-                    statement,
-                    excludedRequestId == null ? -1 : excludedRequestId,
-                    eventDate,
-                    startTime,
-                    endTime);
-            statement.setLong(nextParameter, equipmentId);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT " + ON_HAND_SQL + " FROM equipment e "
+                        + "WHERE e.equipment_id = ? AND e.active = TRUE")) {
+            statement.setLong(1, equipmentId);
             try (ResultSet result = statement.executeQuery()) {
-                if (!result.next()) {
-                    return 0;
-                }
-                return result.getInt("available_quantity");
+                return result.next() ? result.getInt(1) : 0;
             }
         }
-    }
-
-    private static int bindAvailabilityFilter(
-            PreparedStatement statement,
-            long excludedRequestId,
-            java.time.LocalDate eventDate,
-            java.time.LocalTime startTime,
-            java.time.LocalTime endTime) throws SQLException {
-        statement.setLong(1, excludedRequestId);
-        if (eventDate == null) {
-            return 2;
-        }
-        statement.setDate(2, Date.valueOf(eventDate));
-        statement.setTime(3, Time.valueOf(endTime));
-        statement.setTime(4, Time.valueOf(startTime));
-        return 5;
     }
 
     public int countAvailableEquipmentTypes() throws SQLException {
@@ -419,6 +318,7 @@ public class EquipmentService {
                 result.getInt("lost_quantity"),
                 result.getInt("available_quantity"),
                 result.getString("status"),
-                result.getString("custodian_role"));
+                result.getString("custodian_role"),
+                result.getInt("in_use_quantity"));
     }
 }

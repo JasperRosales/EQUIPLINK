@@ -75,6 +75,18 @@ public class EquipmentRequestPanel extends JPanel {
             EquipmentController equipmentController,
             BorrowRequest existingRequest,
             Runnable onSaved) {
+        this(user, requestController, equipmentController, existingRequest, onSaved,
+                List.of());
+    }
+
+    /** @param preselected items chosen in Available Equipment to start the request with */
+    public EquipmentRequestPanel(
+            User user,
+            BorrowRequestController requestController,
+            EquipmentController equipmentController,
+            BorrowRequest existingRequest,
+            Runnable onSaved,
+            List<EquipmentRequestItem> preselected) {
         this.borrowerId = user.getUserId();
         this.requestController = requestController;
         this.equipmentController = equipmentController;
@@ -87,6 +99,9 @@ public class EquipmentRequestPanel extends JPanel {
         setBackground(AppTheme.background());
         setBorder(new EmptyBorder(2, 2, 22, 2));
         initializeValues(user);
+        if (existingRequest == null && preselected != null) {
+            selectedItems.addAll(preselected);
+        }
         buildForm();
         loadEquipment();
     }
@@ -299,7 +314,7 @@ public class EquipmentRequestPanel extends JPanel {
                     equipmentPicker.setEnabled(!availableEquipment.isEmpty());
                     inventoryNote.setText(availableEquipment.isEmpty()
                             ? "No available equipment is registered in the database."
-                            : "Availability reflects active requests, damaged items, and lost items.");
+                            : "Shows stock on hand. Add as many items as you need; stock is deducted when staff confirm release after final approval.");
                     renderSelectedItems();
                 } catch (Exception exception) {
                     inventoryNote.setForeground(AppTheme.danger());
