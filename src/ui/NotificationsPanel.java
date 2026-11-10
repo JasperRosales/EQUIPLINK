@@ -2,20 +2,30 @@ package src.ui;
 
 import src.controller.NotificationController;
 import src.model.Notification;
+import src.ui.components.DateFilter;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 public class NotificationsPanel extends JPanel {
 
@@ -24,6 +34,11 @@ public class NotificationsPanel extends JPanel {
     private final JPanel notificationList = new JPanel();
     private final PrimaryButton markAllRead = new PrimaryButton(
             "Mark all read", PrimaryButton.Style.SECONDARY);
+    private final JTextField search = new JTextField(18);
+    private final JComboBox<String> categoryFilter = new JComboBox<>(new String[] { "All categories" });
+    private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first", "Category" });
+    private final DateFilter dateFilter = new DateFilter();
+    private List<Notification> notifications = List.of();
 
     public NotificationsPanel(long userId, NotificationController notificationController) {
         this.userId = userId;
@@ -55,12 +70,44 @@ public class NotificationsPanel extends JPanel {
         pageHeader.add(titleBlock, BorderLayout.CENTER);
         pageHeader.add(actions, BorderLayout.EAST);
         add(pageHeader);
+        add(Box.createVerticalStrut(10));
+        add(filtersRow());
         add(Box.createVerticalStrut(14));
 
         notificationList.setOpaque(false);
         notificationList.setLayout(new BoxLayout(notificationList, BoxLayout.Y_AXIS));
         add(notificationList);
         reload();
+    }
+
+    private JPanel filtersRow() {
+        JPanel filters = new JPanel(new BorderLayout(8, 0));
+        filters.setOpaque(false);
+        UiSupport.styleInput(search);
+        search.putClientProperty("JTextField.placeholderText",
+                "Search title, message, or requested equipment");
+        search.putClientProperty("JTextField.showClearButton", true);
+        search.getDocument().addDocumentListener(UiSupport.documentListener(this::showNotifications));
+        filters.add(search, BorderLayout.CENTER);
+
+        JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        tools.setOpaque(false);
+        styleCombo(categoryFilter, 170);
+        styleCombo(dateSort, 150);
+        categoryFilter.addActionListener(event -> showNotifications());
+        dateSort.addActionListener(event -> showNotifications());
+        dateFilter.addChangeListener(this::showNotifications);
+        tools.add(categoryFilter);
+        tools.add(dateFilter);
+        tools.add(dateSort);
+        filters.add(tools, BorderLayout.EAST);
+        filters.setAlignmentX(LEFT_ALIGNMENT);
+        return filters;
+    }
+
+    private void styleCombo(JComboBox<String> combo, int width) {
+        combo.setFont(AppTheme.regular(12));
+        combo.setPreferredSize(new Dimension(width, 40));
     }
 
     private void reload() {
@@ -76,7 +123,9 @@ public class NotificationsPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    showNotifications(get());
+                    notifications = get();
+                    refreshCategoryFilter();
+                    showNotifications();
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
@@ -90,31 +139,113 @@ public class NotificationsPanel extends JPanel {
         }.execute();
     }
 
-    private void showNotifications(List<Notification> notifications) {
+    private void refreshCategoryFilter() {
+        Object selected = categoryFilter.getSelectedItem();
+        Set<String> categories = new LinkedHashSet<>();
+        for (Notification notification : notifications) {
+            for (String category : splitValues(notification.getRequestCategories())) {
+                categories.add(category);
+            }
+        }
+        categoryFilter.removeAllItems();
+        categoryFilter.addItem("All categories");
+        categories.stream().sorted(String.CASE_INSENSITIVE_ORDER)
+                .forEach(categoryFilter::addItem);
+        if (selected != null) {
+            categoryFilter.setSelectedItem(selected);
+        }
+        if (categoryFilter.getSelectedIndex() < 0) {
+            categoryFilter.setSelectedIndex(0);
+        }
+    }
+
+    private void showNotifications() {
         notificationList.removeAll();
-        long unread = notifications.stream().filter(notification -> !notification.isRead()).count();
+        long unread = notifications.stream().filter(n -> !n.isRead()).count();
         markAllRead.setEnabled(unread > 0);
+        List<Notification> filtered = filteredNotifications();
         JPanel summary = new JPanel(new BorderLayout());
         summary.setOpaque(false);
-        JLabel count = new JLabel(unread + " unread");
+        JLabel count = new JLabel(unread + " unread · " + filtered.size() + " shown");
         count.setFont(AppTheme.semibold(11));
         count.setForeground(AppTheme.primary());
         summary.add(count, BorderLayout.WEST);
         notificationList.add(summary);
         notificationList.add(Box.createVerticalStrut(9));
 
-        if (notifications.isEmpty()) {
+        if (filtered.isEmpty()) {
             notificationList.add(message(
-                    "You're all caught up. New request updates will appear here.",
+                    notifications.isEmpty()
+                            ? "You're all caught up. New request updates will appear here."
+                            : "No notifications match your search or filters.",
                     false));
         } else {
-            for (Notification notification : notifications) {
+            for (Notification notification : filtered) {
                 notificationList.add(notificationCard(notification));
                 notificationList.add(Box.createVerticalStrut(9));
             }
         }
         notificationList.revalidate();
         notificationList.repaint();
+    }
+
+    private List<Notification> filteredNotifications() {
+        String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
+        String selectedCategory = String.valueOf(categoryFilter.getSelectedItem());
+        int sortMode = dateSort.getSelectedIndex();
+        List<Notification> filtered = new ArrayList<>();
+        for (Notification n : notifications) {
+            if (!query.isEmpty()) {
+                String haystack = (safe(n.getTitle()) + " " + safe(n.getMessage()) + " "
+                        + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()))
+                        .toLowerCase(Locale.ROOT);
+                if (!haystack.contains(query)) {
+                    continue;
+                }
+            }
+            if (selectedCategory != null && !"All categories".equals(selectedCategory)) {
+                boolean match = splitValues(n.getRequestCategories()).stream()
+                        .anyMatch(c -> c.equalsIgnoreCase(selectedCategory));
+                if (!match) {
+                    continue;
+                }
+            }
+            LocalDate date = n.getEventDate() != null ? n.getEventDate() : n.getCreatedAt().toLocalDate();
+            if (!dateFilter.matches(date)) {
+                continue;
+            }
+            filtered.add(n);
+        }
+        Comparator<Notification> cmp;
+        if (sortMode == 2) {
+            cmp = Comparator.comparing((Notification n) -> safe(n.getRequestCategories()).toLowerCase(Locale.ROOT))
+                    .thenComparing(Comparator.comparing(Notification::getCreatedAt).reversed());
+        } else {
+            cmp = Comparator.comparing(Notification::getCreatedAt);
+            if (sortMode <= 0) {
+                cmp = cmp.reversed();
+            }
+        }
+        filtered.sort(cmp.thenComparing(Comparator.comparingLong(Notification::getNotificationId).reversed()));
+        return filtered;
+    }
+
+    private List<String> splitValues(String csv) {
+        List<String> values = new ArrayList<>();
+        if (csv == null || csv.isBlank()) {
+            return values;
+        }
+        for (String part : csv.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                values.add(trimmed);
+            }
+        }
+        return values;
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 
     private JPanel notificationCard(Notification notification) {
@@ -126,15 +257,31 @@ public class NotificationsPanel extends JPanel {
         JLabel title = new JLabel(notification.getTitle());
         title.setFont(AppTheme.semibold(12));
         title.setForeground(AppTheme.foreground());
+        StringBuilder content = new StringBuilder();
+        if (notification.getMessage() != null) {
+            content.append(escape(notification.getMessage()));
+        }
+        if (!safe(notification.getRequestEquipment()).isBlank()) {
+            content.append("<br><b>Requested equipment:</b> ")
+                    .append(escape(notification.getRequestEquipment()));
+        }
+        if (!safe(notification.getRequestCategories()).isBlank()) {
+            content.append("<br><b>Category:</b> ")
+                    .append(escape(notification.getRequestCategories()));
+        }
         JLabel message = new JLabel("<html><div style='width:520px'>"
-                + escape(notification.getMessage()) + "</div></html>");
+                + content + "</div></html>");
         message.setFont(AppTheme.regular(11));
         message.setForeground(AppTheme.muted());
         String date = notification.getCreatedAt().format(
                 DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a"));
-        JLabel time = new JLabel(date
-                + (notification.getRequestId() == null
-                        ? "" : "  ·  Request #" + notification.getRequestId()));
+        String req = notification.getRequestId() == null
+                ? "" : "  ·  Request #" + notification.getRequestId();
+        if (notification.getEventDate() != null) {
+            req += "  ·  Event " + notification.getEventDate().format(
+                    DateTimeFormatter.ofPattern("MMM d, yyyy"));
+        }
+        JLabel time = new JLabel(date + req);
         time.setFont(AppTheme.regular(10.5f));
         time.setForeground(AppTheme.muted());
         body.add(title);
