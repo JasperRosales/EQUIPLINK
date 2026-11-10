@@ -125,25 +125,27 @@ public class LoginFrame extends JFrame {
 
         // Input fields
         addField(form, "Username or email", username);
-        JPanel passwordRow = new JPanel(new BorderLayout(6, 0));
+        JPanel passwordRow = new JPanel(new BorderLayout(0, 0));
         passwordRow.setOpaque(false);
         passwordRow.add(password, BorderLayout.CENTER);
         char defaultEcho = password.getEchoChar();
-        JButton togglePassword = new JButton("👁");
+        JToggleButton togglePassword = new JToggleButton("\uD83D\uDC41");
         togglePassword.setToolTipText("Show password");
         togglePassword.setFont(AppTheme.regular(14));
-        togglePassword.setMargin(new Insets(0, 8, 0, 8));
+        togglePassword.setPreferredSize(new Dimension(44, 45));
         togglePassword.setFocusable(false);
-        togglePassword.setBorderPainted(false);
+        togglePassword.setBorder(BorderFactory.createEmptyBorder());
         togglePassword.setContentAreaFilled(false);
+        togglePassword.setOpaque(false);
+        togglePassword.setForeground(AppTheme.muted());
         togglePassword.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         togglePassword.addActionListener(event -> {
-            if (password.getEchoChar() == 0) {
-                password.setEchoChar(defaultEcho);
-                togglePassword.setToolTipText("Show password");
-            } else {
+            if (togglePassword.isSelected()) {
                 password.setEchoChar((char) 0);
                 togglePassword.setToolTipText("Hide password");
+            } else {
+                password.setEchoChar(defaultEcho);
+                togglePassword.setToolTipText("Show password");
             }
         });
         passwordRow.add(togglePassword, BorderLayout.EAST);
