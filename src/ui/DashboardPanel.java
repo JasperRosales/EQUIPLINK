@@ -26,9 +26,9 @@ import java.util.function.Consumer;
 
 public class DashboardPanel extends JPanel {
 
-    private static final Color GREEN = new Color(22, 163, 128);
-    private static final Color PURPLE = new Color(139, 92, 246);
-    private static final Color ORANGE = new Color(237, 151, 59);
+    private static final Color GREEN = AppTheme.success();
+    private static final Color PURPLE = AppTheme.accent();
+    private static final Color ORANGE = AppTheme.warning();
 
     private final User user;
     private final BorrowRequestController requestController;
