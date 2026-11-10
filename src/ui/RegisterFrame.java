@@ -68,7 +68,7 @@ public class RegisterFrame extends JDialog {
         form.setPreferredSize(new Dimension(460, 620));
 
         JLabel eyebrow = new JLabel("GET STARTED");
-        eyebrow.setFont(AppTheme.semibold(9));
+        eyebrow.setFont(AppTheme.semibold(10.5f));
         eyebrow.setForeground(AppTheme.primary());
         eyebrow.setAlignmentX(LEFT_ALIGNMENT);
         JLabel heading = new JLabel("Create your account");

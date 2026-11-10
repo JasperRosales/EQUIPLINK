@@ -178,7 +178,7 @@ public class UserManagementPanel extends JPanel {
         detail.add(Box.createVerticalStrut(3));
         detail.add(meta);
         JLabel status = new JLabel(user.isActive() ? "ACTIVE" : "INACTIVE");
-        status.setFont(AppTheme.semibold(9));
+        status.setFont(AppTheme.semibold(10.5f));
         status.setForeground(user.isActive() ? AppTheme.success() : AppTheme.danger());
         card.add(detail, BorderLayout.CENTER);
         card.add(status, BorderLayout.EAST);

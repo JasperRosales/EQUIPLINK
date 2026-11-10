@@ -180,7 +180,7 @@ public class EquipmentRequestPanel extends JPanel {
         pickerAndQuantity.setOpaque(false);
         pickerAndQuantity.add(equipmentPicker, BorderLayout.CENTER);
         pickerAndQuantity.add(quantity, BorderLayout.EAST);
-        PrimaryButton addItem = new PrimaryButton("[+] Add item", PrimaryButton.Style.SECONDARY);
+        PrimaryButton addItem = new PrimaryButton("Add item", PrimaryButton.Style.SECONDARY);
         addItem.addActionListener(event -> addSelectedItem());
         pickerRow.add(pickerAndQuantity, BorderLayout.CENTER);
         pickerRow.add(addItem, BorderLayout.EAST);
@@ -250,9 +250,6 @@ public class EquipmentRequestPanel extends JPanel {
         field.setFont(AppTheme.regular(12));
         field.setForeground(AppTheme.foreground());
         field.setBackground(AppTheme.surface());
-        field.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(AppTheme.border()),
-                new EmptyBorder(8, 10, 8, 10)));
     }
 
     private void styleArea(JTextArea area) {

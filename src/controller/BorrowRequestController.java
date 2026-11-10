@@ -2,6 +2,7 @@ package src.controller;
 
 import src.model.BorrowRequest;
 import src.model.BorrowRequestForm;
+import src.model.ItemInspection;
 import src.model.User;
 import src.service.BorrowRequestService;
 
@@ -86,8 +87,14 @@ public class BorrowRequestController {
     }
 
     public void assignStaffRequest(User actor, long requestId) throws Exception {
+        assignStaffRequest(actor, requestId, null);
+    }
+
+    public void assignStaffRequest(
+            User actor, long requestId, List<ItemInspection> assignments) throws Exception {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
-        requestService.assignStaffRequest(actor.getRole(), actor.getUserId(), requestId);
+        requestService.assignStaffRequest(
+                actor.getRole(), actor.getUserId(), requestId, assignments);
     }
 
     public void markStaffRequestNeedsAction(
@@ -109,14 +116,18 @@ public class BorrowRequestController {
         requestService.reviewByDirector(actor.getUserId(), requestId, approve, remarks);
     }
 
-    public void releaseStaffAssignment(User actor, long requestId) throws Exception {
+    public void releaseStaffAssignment(
+            User actor, long requestId, List<ItemInspection> conditions) throws Exception {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
-        requestService.releaseStaffAssignment(actor.getRole(), actor.getUserId(), requestId);
+        requestService.releaseStaffAssignment(
+                actor.getRole(), actor.getUserId(), requestId, conditions);
     }
 
-    public void recordStaffReturn(User actor, long requestId) throws Exception {
+    public void recordStaffReturn(
+            User actor, long requestId, List<ItemInspection> inspections) throws Exception {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
-        requestService.recordStaffReturn(actor.getRole(), actor.getUserId(), requestId);
+        requestService.recordStaffReturn(
+                actor.getRole(), actor.getUserId(), requestId, inspections);
     }
 
     private void requireRole(User actor, String... allowedRoles) {

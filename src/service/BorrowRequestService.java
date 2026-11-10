@@ -4,6 +4,7 @@ import src.database.Database;
 import src.model.BorrowRequest;
 import src.model.BorrowRequestForm;
 import src.model.EquipmentRequestItem;
+import src.model.ItemInspection;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -64,6 +65,9 @@ public class BorrowRequestService {
                 insertItems(connection, requestId, form, equipment, groupIds);
                 recordHistory(connection, requestId, null, borrowerId,
                         "SUBMITTED", null, "PENDING_STAFF", null);
+                notifyGroupStaff(connection, requestId, "PENDING",
+                        "New equipment request",
+                        "A new borrowing request is waiting for equipment processing.");
                 connection.commit();
                 return requestId;
             } catch (Exception exception) {
@@ -115,6 +119,9 @@ public class BorrowRequestService {
                 recordHistory(connection, requestId, null, borrowerId,
                         "BORROWER_EDITED", previousStatus, "PENDING_STAFF",
                         "Borrower updated request details.");
+                notifyGroupStaff(connection, requestId, "PENDING",
+                        "Request updated by borrower",
+                        "A borrowing request was updated and needs equipment processing again.");
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -284,6 +291,16 @@ public class BorrowRequestService {
 
     public void assignStaffRequest(String role, long actorId, long requestId)
             throws Exception {
+        assignStaffRequest(role, actorId, requestId, null);
+    }
+
+    /**
+     * Assigns quantities for the actor's equipment group. A null list assigns the full
+     * requested quantities; otherwise each entry sets the quantity for one item, where
+     * 0 marks the item as unable to fulfill.
+     */
+    public void assignStaffRequest(String role, long actorId, long requestId,
+            List<ItemInspection> assignments) throws Exception {
         String normalizedRole = requireCustodianRole(role);
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
@@ -324,7 +341,7 @@ public class BorrowRequestService {
                     }
                 }
 
-                List<long[]> itemQuantities = new ArrayList<>();
+                Map<Long, Integer> requested = new LinkedHashMap<>();
                 try (PreparedStatement statement = connection.prepareStatement("""
                         SELECT requested_equipment_id, requested_quantity
                         FROM request_items
@@ -334,35 +351,63 @@ public class BorrowRequestService {
                     statement.setLong(1, groupId);
                     try (ResultSet result = statement.executeQuery()) {
                         while (result.next()) {
-                            itemQuantities.add(new long[] {
-                                    result.getLong("requested_equipment_id"),
-                                    result.getInt("requested_quantity")
-                            });
+                            requested.put(result.getLong("requested_equipment_id"),
+                                    result.getInt("requested_quantity"));
                         }
                     }
                 }
-                if (itemQuantities.isEmpty()) {
+                if (requested.isEmpty()) {
                     throw new IllegalArgumentException(
                             "There are no equipment items to assign in this request.");
                 }
 
-                for (long[] item : itemQuantities) {
-                    int available = EquipmentService.findAvailableQuantity(
-                            connection, item[0], requestId, eventDate, startTime, endTime);
-                    if (item[1] > available) {
-                        throw new IllegalArgumentException(
-                                "The requested quantity is no longer available for the selected schedule.");
+                Map<Long, ItemInspection> inputs = new HashMap<>();
+                if (assignments != null) {
+                    for (ItemInspection input : assignments) {
+                        inputs.put(input.getEquipmentId(), input);
                     }
                 }
-
+                int totalAssigned = 0;
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_items
                         SET assigned_equipment_id = requested_equipment_id,
-                            assigned_quantity = requested_quantity
-                        WHERE group_id = ?
+                            assigned_quantity = ?,
+                            inspection_result = ?,
+                            staff_remarks = ?
+                        WHERE group_id = ? AND requested_equipment_id = ?
                         """)) {
-                    statement.setLong(1, groupId);
-                    statement.executeUpdate();
+                    for (Map.Entry<Long, Integer> item : requested.entrySet()) {
+                        ItemInspection input = inputs.get(item.getKey());
+                        int quantity = input == null ? item.getValue() : input.getQuantity();
+                        if (quantity < 0 || quantity > item.getValue()) {
+                            throw new IllegalArgumentException(
+                                    "Assigned quantity must be between 0 and the requested quantity.");
+                        }
+                        int available = EquipmentService.findAvailableQuantity(
+                                connection, item.getKey(), requestId,
+                                eventDate, startTime, endTime);
+                        if (quantity > available) {
+                            throw new IllegalArgumentException(
+                                    "Only " + available
+                                            + " unit(s) are available for the selected schedule.");
+                        }
+                        String note = input == null || input.getRemarks() == null
+                                || input.getRemarks().isBlank()
+                                ? null : input.getRemarks().trim();
+                        statement.setInt(1, quantity);
+                        statement.setString(2, quantity == 0 ? "UNABLE_TO_FULFILL"
+                                : quantity < item.getValue() ? "PARTIAL" : null);
+                        statement.setString(3, note);
+                        statement.setLong(4, groupId);
+                        statement.setLong(5, item.getKey());
+                        statement.addBatch();
+                        totalAssigned += quantity;
+                    }
+                    if (totalAssigned == 0) {
+                        throw new IllegalArgumentException(
+                                "No equipment can be assigned. Use \"Request changes\" to notify the borrower instead.");
+                    }
+                    statement.executeBatch();
                 }
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_groups
@@ -408,7 +453,10 @@ public class BorrowRequestService {
                 if (readyForAdmin) {
                     notifyBorrower(connection, requestId,
                             "Request ready for approval",
-                            "Facility staff completed equipment assignment. Your request is waiting for administrative review.");
+                            "Staff completed equipment assignment. Your request is waiting for administrative review.");
+                    notifyRole(connection, "ADMIN", requestId,
+                            "Request awaiting review",
+                            "A processed borrowing request is waiting for administrative review.");
                 }
                 connection.commit();
             } catch (Exception exception) {
@@ -512,18 +560,19 @@ public class BorrowRequestService {
         reviewRequest(actorId, requestId, "DIRECTOR", approve, remarks);
     }
 
-    public void releaseStaffAssignment(String role, long actorId, long requestId)
-            throws Exception {
-        updateStaffTransaction(role, actorId, requestId, true);
+    public void releaseStaffAssignment(String role, long actorId, long requestId,
+            List<ItemInspection> conditions) throws Exception {
+        updateStaffTransaction(role, actorId, requestId, true, conditions);
     }
 
-    public void recordStaffReturn(String role, long actorId, long requestId)
-            throws Exception {
-        updateStaffTransaction(role, actorId, requestId, false);
+    public void recordStaffReturn(String role, long actorId, long requestId,
+            List<ItemInspection> inspections) throws Exception {
+        updateStaffTransaction(role, actorId, requestId, false, inspections);
     }
 
     private void updateStaffTransaction(
-            String role, long actorId, long requestId, boolean release) throws Exception {
+            String role, long actorId, long requestId, boolean release,
+            List<ItemInspection> inspections) throws Exception {
         String normalizedRole = requireCustodianRole(role);
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
@@ -531,6 +580,7 @@ public class BorrowRequestService {
                 long groupId;
                 String requestStatus;
                 String groupStatus;
+                String issues = null;
                 try (PreparedStatement statement = connection.prepareStatement("""
                         SELECT br.status, rg.group_id, rg.status AS group_status
                         FROM borrow_requests br
@@ -555,14 +605,7 @@ public class BorrowRequestService {
                         throw new IllegalArgumentException(
                                 "Only approved equipment assignments can be released.");
                     }
-                    try (PreparedStatement statement = connection.prepareStatement("""
-                            UPDATE request_items
-                            SET released_quantity = assigned_quantity
-                            WHERE group_id = ?
-                            """)) {
-                        statement.setLong(1, groupId);
-                        statement.executeUpdate();
-                    }
+                    recordReleaseConditions(connection, groupId, inspections);
                     try (PreparedStatement statement = connection.prepareStatement("""
                             UPDATE request_groups
                             SET status = 'RELEASED', released_by = ?,
@@ -583,14 +626,8 @@ public class BorrowRequestService {
                         throw new IllegalArgumentException(
                                 "Only released equipment can be marked as returned.");
                     }
-                    try (PreparedStatement statement = connection.prepareStatement("""
-                            UPDATE request_items
-                            SET returned_quantity = released_quantity
-                            WHERE group_id = ?
-                            """)) {
-                        statement.setLong(1, groupId);
-                        statement.executeUpdate();
-                    }
+                    issues = recordReturnInspection(
+                            connection, requestId, groupId, inspections);
                     try (PreparedStatement statement = connection.prepareStatement("""
                             UPDATE request_groups
                             SET status = 'RETURNED', inspected_by = ?,
@@ -631,12 +668,23 @@ public class BorrowRequestService {
                 }
                 recordHistory(connection, requestId, groupId, actorId,
                         release ? "EQUIPMENT_RELEASED" : "EQUIPMENT_RETURNED",
-                        requestStatus, nextStatus, null);
+                        requestStatus, nextStatus, issues);
+                if (issues != null) {
+                    notifyRole(connection, "ADMIN", requestId,
+                            "Damaged or missing equipment",
+                            "Return inspection found issues: " + issues);
+                }
                 notifyBorrower(connection, requestId,
                         release ? "Equipment released" : "Equipment returned",
                         release
-                                ? "Your approved equipment is ready for pickup."
-                                : "Your returned equipment has been recorded.");
+                                ? "Your approved equipment has been released to you."
+                                : issues == null
+                                        ? "Your returned equipment was inspected with no issues."
+                                        : "Your returned equipment was inspected. Issues found: " + issues);
+                if ("COMPLETED".equals(nextStatus)) {
+                    notifyBorrower(connection, requestId, "Transaction completed",
+                            "All equipment has been returned and the request is completed.");
+                }
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -704,6 +752,15 @@ public class BorrowRequestService {
                 recordHistory(connection, requestId, null, actorId,
                         event, currentStatus, nextStatus,
                         remarks == null || remarks.isBlank() ? null : remarks.trim());
+                if (approve && "ADMIN".equals(reviewerRole)) {
+                    notifyRole(connection, "DIRECTOR", requestId,
+                            "Request awaiting final approval",
+                            "A borrowing request approved by the administrator needs your final decision.");
+                } else if (approve) {
+                    notifyGroupStaff(connection, requestId, "ASSIGNED",
+                            "Equipment ready for release",
+                            "A request was given final approval. Record the equipment condition and release it.");
+                }
                 notifyBorrower(connection, requestId,
                         approve ? "Request approved" : "Request rejected",
                         approve
@@ -716,6 +773,192 @@ public class BorrowRequestService {
                 connection.rollback();
                 throw exception;
             }
+        }
+    }
+
+    private void recordReleaseConditions(
+            Connection connection, long groupId, List<ItemInspection> inspections)
+            throws SQLException {
+        Map<Long, ItemInspection> inputs = indexInspections(inspections);
+        List<long[]> items = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT request_item_id, requested_equipment_id
+                FROM request_items
+                WHERE group_id = ? AND assigned_quantity > 0
+                """)) {
+            statement.setLong(1, groupId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    items.add(new long[] { result.getLong(1), result.getLong(2) });
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE request_items
+                SET released_quantity = assigned_quantity,
+                    condition_before = ?,
+                    staff_remarks = COALESCE(?, staff_remarks)
+                WHERE request_item_id = ?
+                """)) {
+            for (long[] item : items) {
+                ItemInspection input = inputs.get(item[1]);
+                if (input == null || input.getCondition() == null
+                        || input.getCondition().isBlank()) {
+                    throw new IllegalArgumentException(
+                            "Record the initial condition of every released item.");
+                }
+                statement.setString(1, limit(input.getCondition(), 80));
+                statement.setString(2, blankToNull(input.getRemarks()));
+                statement.setLong(3, item[0]);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    /** Records return inspection; returns an issue summary, or null when none. */
+    private String recordReturnInspection(
+            Connection connection, long requestId, long groupId,
+            List<ItemInspection> inspections) throws SQLException {
+        Map<Long, ItemInspection> inputs = indexInspections(inspections);
+        StringBuilder issues = new StringBuilder();
+        List<Object[]> items = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT ri.request_item_id, ri.requested_equipment_id,
+                       ri.assigned_equipment_id, ri.released_quantity, e.equipment_name
+                FROM request_items ri
+                JOIN equipment e ON e.equipment_id = ri.requested_equipment_id
+                WHERE ri.group_id = ? AND ri.released_quantity > 0
+                """)) {
+            statement.setLong(1, groupId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    items.add(new Object[] {
+                            result.getLong(1), result.getLong(2), result.getLong(3),
+                            result.getInt(4), result.getString(5) });
+                }
+            }
+        }
+        try (PreparedStatement itemUpdate = connection.prepareStatement("""
+                UPDATE request_items
+                SET returned_quantity = ?, damaged_quantity = ?, missing_quantity = ?,
+                    condition_after = ?, inspection_result = ?,
+                    staff_remarks = COALESCE(?, staff_remarks)
+                WHERE request_item_id = ?
+                """);
+                PreparedStatement equipmentUpdate = connection.prepareStatement("""
+                        UPDATE equipment
+                        SET damaged_quantity = damaged_quantity + ?,
+                            lost_quantity = lost_quantity + ?
+                        WHERE equipment_id = ?
+                        """)) {
+            for (Object[] item : items) {
+                long requestItemId = (Long) item[0];
+                long equipmentId = (Long) item[1];
+                long assignedEquipmentId = (Long) item[2];
+                int released = (Integer) item[3];
+                String name = (String) item[4];
+                ItemInspection input = inputs.get(equipmentId);
+                if (input == null || input.getCondition() == null
+                        || input.getCondition().isBlank()) {
+                    throw new IllegalArgumentException(
+                            "Record the returned condition of every item.");
+                }
+                int damaged = input.getDamagedQuantity();
+                int missing = input.getMissingQuantity();
+                if (damaged < 0 || missing < 0 || damaged + missing > released) {
+                    throw new IllegalArgumentException(
+                            "Damaged and missing quantities for " + name
+                                    + " cannot exceed the " + released + " released.");
+                }
+                boolean hasIssue = damaged > 0 || missing > 0;
+                itemUpdate.setInt(1, released - missing);
+                itemUpdate.setInt(2, damaged);
+                itemUpdate.setInt(3, missing);
+                itemUpdate.setString(4, limit(input.getCondition(), 80));
+                itemUpdate.setString(5, hasIssue ? "WITH_ISSUES" : "OK");
+                itemUpdate.setString(6, blankToNull(input.getRemarks()));
+                itemUpdate.setLong(7, requestItemId);
+                itemUpdate.addBatch();
+                if (hasIssue) {
+                    equipmentUpdate.setInt(1, damaged);
+                    equipmentUpdate.setInt(2, missing);
+                    equipmentUpdate.setLong(3, assignedEquipmentId);
+                    equipmentUpdate.addBatch();
+                    if (issues.length() > 0) {
+                        issues.append("; ");
+                    }
+                    issues.append(name).append(" (")
+                            .append(damaged).append(" damaged, ")
+                            .append(missing).append(" missing)");
+                }
+            }
+            itemUpdate.executeBatch();
+            equipmentUpdate.executeBatch();
+        }
+        if (issues.length() == 0) {
+            return null;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE borrow_requests SET has_issues = TRUE WHERE request_id = ?")) {
+            statement.setLong(1, requestId);
+            statement.executeUpdate();
+        }
+        return issues.toString();
+    }
+
+    private Map<Long, ItemInspection> indexInspections(List<ItemInspection> inspections) {
+        Map<Long, ItemInspection> map = new HashMap<>();
+        if (inspections != null) {
+            for (ItemInspection inspection : inspections) {
+                map.put(inspection.getEquipmentId(), inspection);
+            }
+        }
+        return map;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String limit(String value, int max) {
+        String trimmed = value.trim();
+        return trimmed.length() > max ? trimmed.substring(0, max) : trimmed;
+    }
+
+    private void notifyRole(
+            Connection connection, String role, long requestId, String title, String message)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO notifications (user_id, request_id, title, message)
+                SELECT user_id, ?, ?, ?
+                FROM users
+                WHERE role = ? AND active = TRUE
+                """)) {
+            statement.setLong(1, requestId);
+            statement.setString(2, title);
+            statement.setString(3, message);
+            statement.setString(4, role);
+            statement.executeUpdate();
+        }
+    }
+
+    /** Notifies staff whose equipment group on the request has the given status. */
+    private void notifyGroupStaff(
+            Connection connection, long requestId, String groupStatus,
+            String title, String message) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO notifications (user_id, request_id, title, message)
+                SELECT u.user_id, rg.request_id, ?, ?
+                FROM request_groups rg
+                JOIN users u ON u.role = rg.custodian_role AND u.active = TRUE
+                WHERE rg.request_id = ? AND rg.status = ?
+                """)) {
+            statement.setString(1, title);
+            statement.setString(2, message);
+            statement.setLong(3, requestId);
+            statement.setString(4, groupStatus);
+            statement.executeUpdate();
         }
     }
 
@@ -769,7 +1012,9 @@ public class BorrowRequestService {
                        e.equipment_id, e.equipment_code, e.equipment_name, e.category,
                        rg.custodian_role, rg.status AS group_status,
                        ri.requested_quantity, ri.assigned_quantity,
-                       ri.released_quantity, ri.returned_quantity
+                       ri.released_quantity, ri.returned_quantity,
+                       ri.damaged_quantity, ri.missing_quantity,
+                       ri.condition_before, ri.condition_after
                 FROM borrow_requests br
                 JOIN users u ON u.user_id = br.borrower_id
                 LEFT JOIN request_items ri ON ri.request_id = br.request_id
@@ -804,7 +1049,11 @@ public class BorrowRequestService {
                                 result.getInt("released_quantity"),
                                 result.getInt("returned_quantity"),
                                 result.getString("custodian_role"),
-                                result.getString("group_status")));
+                                result.getString("group_status"),
+                                result.getInt("damaged_quantity"),
+                                result.getInt("missing_quantity"),
+                                result.getString("condition_before"),
+                                result.getString("condition_after")));
                     }
                 }
             }

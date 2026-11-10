@@ -75,17 +75,24 @@ public class RequestQueuePanel extends JPanel {
         text.add(subtitle);
         header.add(text, BorderLayout.NORTH);
 
-        JPanel filters = new JPanel(new BorderLayout(8, 0));
+        JPanel filters = new JPanel(new BorderLayout(10, 0));
         filters.setOpaque(false);
         UiSupport.styleInput(search);
+        search.putClientProperty("JTextField.placeholderText",
+                "Search by code, borrower, venue, or equipment");
+        search.putClientProperty("JTextField.showClearButton", true);
         search.getDocument().addDocumentListener(UiSupport.documentListener(this::showRequests));
         filters.add(search, BorderLayout.CENTER);
-        dateSort.setFont(AppTheme.regular(10));
+        JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        tools.setOpaque(false);
+        dateSort.setFont(AppTheme.regular(12));
+        dateSort.setPreferredSize(new java.awt.Dimension(150, 40));
         dateSort.addActionListener(event -> showRequests());
-        filters.add(dateSort, BorderLayout.EAST);
+        tools.add(dateSort);
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
         refresh.addActionListener(event -> loadRequests());
-        filters.add(refresh, BorderLayout.SOUTH);
+        tools.add(refresh);
+        filters.add(tools, BorderLayout.EAST);
         header.add(filters, BorderLayout.CENTER);
         header.setAlignmentX(LEFT_ALIGNMENT);
         add(header);
@@ -183,9 +190,7 @@ public class RequestQueuePanel extends JPanel {
                 + request.getBorrowerName());
         code.setFont(AppTheme.semibold(13));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new JLabel(UiSupport.displayStatus(request.getStatus()));
-        status.setFont(AppTheme.semibold(10));
-        status.setForeground(UiSupport.statusColor(request.getStatus()));
+        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
         title.add(code, BorderLayout.CENTER);
         title.add(status, BorderLayout.EAST);
 
@@ -218,7 +223,7 @@ public class RequestQueuePanel extends JPanel {
 
     private void addModeActions(JPanel actions, BorrowRequest request) {
         if (mode == Mode.STAFF_QUEUE) {
-            PrimaryButton assign = new PrimaryButton("Confirm assignment");
+            PrimaryButton assign = new PrimaryButton("Assign equipment");
             assign.addActionListener(event -> assignRequest(request));
             PrimaryButton needsAction = new PrimaryButton(
                     "Request changes", PrimaryButton.Style.SECONDARY);
@@ -243,7 +248,7 @@ public class RequestQueuePanel extends JPanel {
                 actions.add(release);
             } else if (hasReleased) {
                 PrimaryButton returned = new PrimaryButton(
-                        "Record return", PrimaryButton.Style.SECONDARY);
+                        "Inspect return", PrimaryButton.Style.SECONDARY);
                 returned.addActionListener(event -> updateTransaction(request, false));
                 actions.add(returned);
             }
@@ -251,18 +256,14 @@ public class RequestQueuePanel extends JPanel {
     }
 
     private void assignRequest(BorrowRequest request) {
-        int answer = JOptionPane.showConfirmDialog(
-                this,
-                "Assign the requested quantities to this role's equipment group? "
-                        + "Availability will be checked against the event schedule.",
-                "Confirm equipment assignment",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.QUESTION_MESSAGE);
-        if (answer != JOptionPane.YES_OPTION) {
+        List<src.model.ItemInspection> assignments = ItemInspectionDialog.show(
+                this, request, actor.getRole(), ItemInspectionDialog.Kind.ASSIGN);
+        if (assignments == null) {
             return;
         }
         runAction("Unable to assign equipment", () ->
-                requestController.assignStaffRequest(actor, request.getRequestId()));
+                requestController.assignStaffRequest(
+                        actor, request.getRequestId(), assignments));
     }
 
     private void requestChanges(BorrowRequest request) {
@@ -311,22 +312,21 @@ public class RequestQueuePanel extends JPanel {
     }
 
     private void updateTransaction(BorrowRequest request, boolean release) {
-        String description = release
-                ? "Release assigned equipment for this request?"
-                : "Mark the assigned equipment as returned?";
-        int answer = JOptionPane.showConfirmDialog(
-                this, description, release ? "Release equipment" : "Record return",
-                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-        if (answer != JOptionPane.YES_OPTION) {
+        List<src.model.ItemInspection> inspections = ItemInspectionDialog.show(
+                this, request, actor.getRole(),
+                release ? ItemInspectionDialog.Kind.RELEASE : ItemInspectionDialog.Kind.RETURN);
+        if (inspections == null) {
             return;
         }
         runAction(
                 release ? "Unable to release equipment" : "Unable to record return",
                 () -> {
                     if (release) {
-                        requestController.releaseStaffAssignment(actor, request.getRequestId());
+                        requestController.releaseStaffAssignment(
+                                actor, request.getRequestId(), inspections);
                     } else {
-                        requestController.recordStaffReturn(actor, request.getRequestId());
+                        requestController.recordStaffReturn(
+                                actor, request.getRequestId(), inspections);
                     }
                 });
     }

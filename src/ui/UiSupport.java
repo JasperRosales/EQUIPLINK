@@ -15,7 +15,7 @@ public final class UiSupport {
     }
 
     public static JScrollPane scroll(JComponent content) {
-        JScrollPane scroll = new JScrollPane(content);
+        JScrollPane scroll = new JScrollPane(new TopAlignedView(content));
         scroll.setBorder(null);
         scroll.getViewport().setBackground(AppTheme.background());
         scroll.getVerticalScrollBar().setUnitIncrement(18);
@@ -27,10 +27,7 @@ public final class UiSupport {
         field.setFont(AppTheme.regular(13));
         field.setForeground(AppTheme.foreground());
         field.setBackground(AppTheme.surface());
-        field.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(AppTheme.border()),
-                new EmptyBorder(10, 12, 10, 12)));
-        field.setPreferredSize(new Dimension(field.getPreferredSize().width, 42));
+        field.setPreferredSize(new Dimension(field.getPreferredSize().width, 40));
     }
 
     public static DocumentListener documentListener(Runnable action) {
@@ -58,9 +55,13 @@ public final class UiSupport {
         }
         switch (status) {
             case "RELEASED":
+            case "ASSIGNED":
                 return AppTheme.primary();
+            case "APPROVED":
             case "COMPLETED":
+            case "RETURNED":
                 return AppTheme.success();
+            case "UNABLE":
             case "REJECTED":
             case "CANCELLED":
                 return AppTheme.danger();
@@ -75,11 +76,17 @@ public final class UiSupport {
         if ("RELEASED".equals(status)) {
             return "Borrowed";
         }
-        if ("PENDING_STAFF".equals(status)
-                || "PENDING_ADMIN".equals(status)
-                || "PENDING_DIRECTOR".equals(status)
-                || "APPROVED".equals(status)) {
-            return "Pending";
+        if ("PENDING_STAFF".equals(status)) {
+            return "Staff review";
+        }
+        if ("PENDING_ADMIN".equals(status)) {
+            return "Admin review";
+        }
+        if ("PENDING_DIRECTOR".equals(status)) {
+            return "Director review";
+        }
+        if ("UNABLE".equals(status)) {
+            return "Unable to fulfill";
         }
         if ("NEEDS_ACTION".equals(status)) {
             return "Needs action";
@@ -96,5 +103,43 @@ public final class UiSupport {
             text.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
         }
         return text.toString();
+    }
+
+    /** Keeps page content at its preferred height and tracks the viewport width. */
+    private static final class TopAlignedView extends javax.swing.JPanel
+            implements javax.swing.Scrollable {
+
+        TopAlignedView(JComponent content) {
+            super(new java.awt.BorderLayout());
+            setOpaque(false);
+            add(content, java.awt.BorderLayout.NORTH);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(
+                java.awt.Rectangle visible, int orientation, int direction) {
+            return 18;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(
+                java.awt.Rectangle visible, int orientation, int direction) {
+            return visible.height - 36;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return getParent() != null && getPreferredSize().height < getParent().getHeight();
+        }
     }
 }

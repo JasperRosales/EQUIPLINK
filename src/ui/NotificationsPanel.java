@@ -135,7 +135,7 @@ public class NotificationsPanel extends JPanel {
         JLabel time = new JLabel(date
                 + (notification.getRequestId() == null
                         ? "" : "  ·  Request #" + notification.getRequestId()));
-        time.setFont(AppTheme.regular(9));
+        time.setFont(AppTheme.regular(10.5f));
         time.setForeground(AppTheme.muted());
         body.add(title);
         body.add(Box.createVerticalStrut(5));

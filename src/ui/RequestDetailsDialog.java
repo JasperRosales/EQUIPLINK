@@ -38,9 +38,7 @@ public class RequestDetailsDialog extends JDialog {
         JLabel code = new JLabel(request.getRequestCode());
         code.setFont(AppTheme.semibold(18));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new JLabel(UiSupport.displayStatus(request.getStatus()));
-        status.setFont(AppTheme.semibold(11));
-        status.setForeground(UiSupport.statusColor(request.getStatus()));
+        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
         status.setHorizontalAlignment(SwingConstants.RIGHT);
         summary.add(code, BorderLayout.WEST);
         summary.add(status, BorderLayout.EAST);
@@ -89,7 +87,8 @@ public class RequestDetailsDialog extends JDialog {
                                 + " · Requested " + item.getRequestedQuantity()
                         + " · Assigned " + item.getAssignedQuantity()
                         + " · Released " + item.getReleasedQuantity()
-                                + " · Returned " + item.getReturnedQuantity());
+                                + " · Returned " + item.getReturnedQuantity()
+                                + inspectionSummary(item));
             }
         }
         content.add(equipment);
@@ -132,6 +131,23 @@ public class RequestDetailsDialog extends JDialog {
         row.add(key, BorderLayout.WEST);
         row.add(detail, BorderLayout.CENTER);
         panel.add(row);
+    }
+
+    private String inspectionSummary(EquipmentRequestItem item) {
+        StringBuilder text = new StringBuilder();
+        if (item.getConditionBefore() != null) {
+            text.append(" · Before: ").append(item.getConditionBefore());
+        }
+        if (item.getConditionAfter() != null) {
+            text.append(" · After: ").append(item.getConditionAfter());
+        }
+        if (item.getDamagedQuantity() > 0) {
+            text.append(" · Damaged ").append(item.getDamagedQuantity());
+        }
+        if (item.getMissingQuantity() > 0) {
+            text.append(" · Missing ").append(item.getMissingQuantity());
+        }
+        return text.toString();
     }
 
     private String blankAsDash(String value) {

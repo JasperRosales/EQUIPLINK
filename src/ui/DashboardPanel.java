@@ -61,7 +61,7 @@ public class DashboardPanel extends JPanel {
     private void addWelcomeCard() {
         SurfacePanel welcome = new SurfacePanel();
         welcome.setLayout(new BorderLayout(15, 5));
-        welcome.setMaximumSize(new Dimension(980, 118));
+        welcome.setMaximumSize(new Dimension(Integer.MAX_VALUE, 104));
         welcome.setAlignmentX(LEFT_ALIGNMENT);
 
         JPanel text = new JPanel();
@@ -70,12 +70,12 @@ public class DashboardPanel extends JPanel {
         String fullName = user.getFullName() == null ? "" : user.getFullName().trim();
         String firstName = fullName.isEmpty() ? "there" : fullName.split("\\s+")[0];
         JLabel greeting = new JLabel("Good day, " + firstName + "!");
-        greeting.setFont(AppTheme.semibold(18));
+        greeting.setFont(AppTheme.semibold(19));
         greeting.setForeground(AppTheme.foreground());
         JLabel subtitle = new JLabel(isBorrower()
                 ? "Welcome back to your campus equipment workspace."
                 : "Review request activity and manage campus equipment.");
-        subtitle.setFont(AppTheme.regular(11));
+        subtitle.setFont(AppTheme.regular(12));
         subtitle.setForeground(AppTheme.muted());
         text.add(greeting);
         text.add(Box.createVerticalStrut(3));
@@ -86,13 +86,13 @@ public class DashboardPanel extends JPanel {
                 ? "Request equipment"
                 : "Open request queue");
 
-        action.setFont(AppTheme.semibold(11));
-        action.setPreferredSize(new Dimension(155, 34));
-        action.setMaximumSize(new Dimension(155, 34));
+        JPanel actionWrap = new JPanel(new java.awt.GridBagLayout());
+        actionWrap.setOpaque(false);
+        actionWrap.add(action);
 
         action.addActionListener(event -> openPage.accept(
                 isBorrower() ? "Request Equipment" : "Borrowing Requests"));
-        welcome.add(action, BorderLayout.EAST);
+        welcome.add(actionWrap, BorderLayout.EAST);
         add(welcome);
     }
 
@@ -181,6 +181,8 @@ public class DashboardPanel extends JPanel {
         requestList.setLayout(new BoxLayout(requestList, BoxLayout.Y_AXIS));
         JScrollPane recentScroll = UiSupport.scroll(requestList);
         recentScroll.setPreferredSize(new Dimension(0, 195));
+        recentScroll.setOpaque(false);
+        recentScroll.getViewport().setOpaque(false);
         recent.add(recentScroll, BorderLayout.CENTER);
 
         SurfacePanel shortcuts = new SurfacePanel();
@@ -219,8 +221,6 @@ public class DashboardPanel extends JPanel {
 
     private void addShortcut(JPanel parent, String title, String subtitle, String page) {
         PrimaryButton shortcut = new PrimaryButton(title, PrimaryButton.Style.SECONDARY);
-        shortcut.setText(("Borrowing Request".equals(page)
-                || "Schedule & Assignment".equals(page) ? "[H] " : "[+] ") + title);
         shortcut.setHorizontalAlignment(SwingConstants.LEFT);
         shortcut.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
         shortcut.addActionListener(event -> openPage.accept(page));
@@ -335,21 +335,21 @@ public class DashboardPanel extends JPanel {
             for (BorrowRequest record : requests.subList(0, visibleCount)) {
                 JPanel row = new JPanel(new BorderLayout(8, 4));
                 row.setOpaque(false);
-                row.setBorder(new EmptyBorder(3, 0, 8, 0));
+                row.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                        javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
+                        new EmptyBorder(9, 0, 9, 0)));
                 JLabel heading = new JLabel(record.getRequestCode());
-                heading.setFont(AppTheme.semibold(12));
+                heading.setFont(AppTheme.semibold(12.5f));
                 heading.setForeground(AppTheme.foreground());
                 JLabel details = new JLabel(
                         record.getVenue() + "  ·  "
                                 + record.getEventDate().format(
                                         DateTimeFormatter.ofPattern("MMM d, yyyy")));
-                details.setFont(AppTheme.regular(10));
+                details.setFont(AppTheme.regular(11));
                 details.setForeground(AppTheme.muted());
                 row.add(heading, BorderLayout.NORTH);
                 row.add(details, BorderLayout.CENTER);
-                JLabel status = new JLabel(UiSupport.displayStatus(record.getStatus()));
-                status.setFont(AppTheme.semibold(10));
-                status.setForeground(UiSupport.statusColor(record.getStatus()));
+                JLabel status = new src.ui.components.StatusBadge(record.getStatus());
                 row.add(status, BorderLayout.EAST);
                 requestList.add(row);
             }

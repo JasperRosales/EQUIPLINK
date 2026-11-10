@@ -32,7 +32,7 @@ public class LoginFrame extends JFrame {
             new Color(255, 255, 255, 235);
 
     private static final Color NAVY =
-            new Color(28, 49, 82);
+            new Color(15, 23, 42);
 
     public LoginFrame(
             AuthController authController,
@@ -86,7 +86,7 @@ public class LoginFrame extends JFrame {
         form.setPreferredSize(new Dimension(376, 460));
 
         JLabel eyebrow = new JLabel("WELCOME BACK");
-        eyebrow.setFont(AppTheme.semibold(9));
+        eyebrow.setFont(AppTheme.semibold(10.5f));
         eyebrow.setForeground(AppTheme.primary());
         eyebrow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -98,8 +98,8 @@ public class LoginFrame extends JFrame {
         JLabel subtitle = new JLabel(
                 "Enter your details to continue to EquipLink."
         );
-        subtitle.setFont(AppTheme.regular(11));
-        subtitle.setForeground(new Color(105, 125, 155));
+        subtitle.setFont(AppTheme.regular(12));
+        subtitle.setForeground(AppTheme.muted());
         subtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         form.add(eyebrow);
@@ -123,7 +123,7 @@ public class LoginFrame extends JFrame {
                 "Your account is protected."
         );
 
-        securityHint.setFont(AppTheme.regular(9));
+        securityHint.setFont(AppTheme.regular(10.5f));
         securityHint.setForeground(new Color(125, 140, 163));
 
         JButton forgotPassword = new JButton("Forgot password?");
@@ -241,20 +241,9 @@ public class LoginFrame extends JFrame {
 
     private void styleGlassInput(JComponent field) {
 
-        field.setFont(AppTheme.regular(11));
-        field.setForeground(NAVY);
-        field.setBackground(INPUT_BACKGROUND);
-        field.setOpaque(true);
-
-        field.setBorder(
-                BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(
-                                new Color(190, 207, 230),
-                                1
-                        ),
-                        new EmptyBorder(10, 13, 10, 13)
-                )
-        );
+        field.setFont(AppTheme.regular(13));
+        field.setForeground(AppTheme.foreground());
+        field.setBackground(AppTheme.surface());
 
         field.setFocusable(true);
     }
@@ -359,7 +348,7 @@ public class LoginFrame extends JFrame {
                 Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         );
 
-        button.setFont(AppTheme.regular(9));
+        button.setFont(AppTheme.regular(10.5f));
     }
 
     // =========================================
@@ -387,26 +376,8 @@ public class LoginFrame extends JFrame {
             int width = getWidth();
             int height = getHeight();
 
-            // Soft gradient background
-            GradientPaint gradient = new GradientPaint(
-                    0, 0,
-                    new Color(239, 246, 255),
-                    width, height,
-                    new Color(215, 230, 249)
-            );
-
-            g2.setPaint(gradient);
+            g2.setColor(AppTheme.background());
             g2.fillRect(0, 0, width, height);
-
-            // Decorative glass circles
-            g2.setColor(new Color(255, 255, 255, 75));
-            g2.fillOval(width - 180, 40, 220, 220);
-
-            g2.setColor(new Color(90, 145, 210, 28));
-            g2.fillOval(20, height - 175, 220, 220);
-
-            g2.setColor(new Color(255, 255, 255, 45));
-            g2.fillOval(width / 2, height / 2, 100, 100);
 
             g2.dispose();
         }
@@ -435,67 +406,13 @@ public class LoginFrame extends JFrame {
             int width = getWidth();
             int height = getHeight();
 
-            // Soft shadow
-            for (int i = 5; i >= 1; i--) {
-
-                g2.setColor(
-                        new Color(30, 55, 90, 7 + i * 3)
-                );
-
-                g2.fillRoundRect(
-                        4,
-                        5 + i,
-                        width - 9,
-                        height - 10,
-                        30,
-                        30
-                );
-            }
-
-            // Translucent glass gradient
-            GradientPaint glassGradient = new GradientPaint(
-                    0, 0,
-                    new Color(255, 255, 255, 235),
-                    width, height,
-                    new Color(240, 247, 255, 200)
-            );
-
-            g2.setPaint(glassGradient);
-
-            g2.fillRoundRect(
-                    4,
-                    4,
-                    width - 9,
-                    height - 10,
-                    28,
-                    28
-            );
-
-            // Glass border
-            g2.setColor(GLASS_BORDER);
-
-            g2.setStroke(new BasicStroke(1.5f));
-
-            g2.drawRoundRect(
-                    4,
-                    4,
-                    width - 9,
-                    height - 10,
-                    28,
-                    28
-            );
-
-            // Subtle highlight
-            g2.setColor(
-                    new Color(255, 255, 255, 115)
-            );
-
-            g2.drawLine(
-                    30,
-                    15,
-                    width - 30,
-                    15
-            );
+            int arc = 16;
+            g2.setColor(new Color(15, 23, 42, 12));
+            g2.fillRoundRect(4, 7, width - 9, height - 10, arc, arc);
+            g2.setColor(AppTheme.surface());
+            g2.fillRoundRect(4, 4, width - 9, height - 10, arc, arc);
+            g2.setColor(AppTheme.border());
+            g2.drawRoundRect(4, 4, width - 9, height - 10, arc, arc);
 
             g2.dispose();
 

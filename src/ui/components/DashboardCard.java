@@ -30,11 +30,11 @@ public class DashboardCard extends JPanel {
         setBorder(new EmptyBorder(18, 19, 17, 19));
 
         JLabel label = new JLabel(title);
-        label.setFont(AppTheme.regular(12));
+        label.setFont(AppTheme.semibold(11.5f));
         label.setForeground(AppTheme.muted());
 
         amount = new JLabel(value);
-        amount.setFont(AppTheme.semibold(28));
+        amount.setFont(AppTheme.semibold(26));
         amount.setForeground(AppTheme.foreground());
         JLabel note = new JLabel(caption);
         note.setFont(AppTheme.regular(11));
@@ -93,14 +93,18 @@ public class DashboardCard extends JPanel {
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = (Graphics2D) graphics.create();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(new Color(15, 23, 42, AppTheme.isDarkMode() ? 0 : 10));
+        g.fillRoundRect(0, 1, getWidth(), getHeight() - 1, 12, 12);
         g.setColor(AppTheme.surface());
-        g.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
+        g.fillRoundRect(0, 0, getWidth(), getHeight() - 1, 12, 12);
         if (hovered) {
             g.setColor(withAlpha(accent, 12));
-            g.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
+            g.fillRoundRect(0, 0, getWidth(), getHeight() - 1, 12, 12);
         }
+        g.setColor(accent);
+        g.fillRoundRect(19, 0, 28, 3, 3, 3);
         g.setColor(AppTheme.border());
-        g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 18, 18);
+        g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 2, 12, 12);
         g.dispose();
         super.paintComponent(graphics);
     }

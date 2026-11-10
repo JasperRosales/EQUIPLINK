@@ -140,7 +140,7 @@ public class PasswordResetRequestsPanel extends JPanel {
         JLabel date = new JLabel("Requested "
                 + request.getRequestedAt().format(
                         DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a")));
-        date.setFont(AppTheme.regular(9));
+        date.setFont(AppTheme.regular(10.5f));
         date.setForeground(AppTheme.muted());
         details.add(name);
         details.add(Box.createVerticalStrut(4));
