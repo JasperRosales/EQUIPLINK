@@ -14,11 +14,20 @@ public class NotificationService {
 
     public List<Notification> findForUser(long userId) throws SQLException {
         String sql = """
-                SELECT notification_id, user_id, request_id, title,
-                       message, is_read, created_at
-                FROM notifications
-                WHERE user_id = ?
-                ORDER BY created_at DESC, notification_id DESC
+                SELECT n.notification_id, n.user_id, n.request_id, n.title,
+                       n.message, n.is_read, n.created_at,
+                       br.event_date,
+                       COALESCE(string_agg(DISTINCT e.equipment_name, ', '), '') AS equipment_names,
+                       COALESCE(string_agg(DISTINCT e.category, ', '), '') AS equipment_categories
+                FROM notifications n
+                LEFT JOIN borrow_requests br ON br.request_id = n.request_id
+                LEFT JOIN request_items ri ON ri.request_id = br.request_id
+                LEFT JOIN equipment e ON e.equipment_id = COALESCE(
+                        ri.assigned_equipment_id, ri.requested_equipment_id)
+                WHERE n.user_id = ?
+                GROUP BY n.notification_id, n.user_id, n.request_id, n.title,
+                         n.message, n.is_read, n.created_at, br.event_date
+                ORDER BY n.created_at DESC, n.notification_id DESC
                 LIMIT 100
                 """;
         List<Notification> notifications = new ArrayList<>();
@@ -29,6 +38,7 @@ public class NotificationService {
                 while (result.next()) {
                     long requestId = result.getLong("request_id");
                     Long nullableRequestId = result.wasNull() ? null : requestId;
+                    java.sql.Date eventDate = result.getDate("event_date");
                     notifications.add(new Notification(
                             result.getLong("notification_id"),
                             result.getLong("user_id"),
@@ -36,7 +46,10 @@ public class NotificationService {
                             result.getString("title"),
                             result.getString("message"),
                             result.getBoolean("is_read"),
-                            result.getTimestamp("created_at").toLocalDateTime()));
+                            result.getTimestamp("created_at").toLocalDateTime(),
+                            result.getString("equipment_names"),
+                            result.getString("equipment_categories"),
+                            eventDate == null ? null : eventDate.toLocalDate()));
                 }
             }
         }
