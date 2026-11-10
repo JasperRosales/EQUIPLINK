@@ -112,8 +112,9 @@ public class RequestQueuePanel extends JPanel {
                     case DIRECTOR_REVIEW:
                         return requestController.findDirectorQueue(actor);
                     case SCHEDULE_ASSIGNMENT:
+                        return requestController.findScheduleForRole(actor);
                     case TRANSACTION_HISTORY:
-                        return requestController.findTransactionsForRole(actor);
+                        return requestController.findHistoryForRole(actor);
                     case ALL_REQUESTS:
                     default:
                         return requestController.findAllRequests(actor);
@@ -418,15 +419,15 @@ public class RequestQueuePanel extends JPanel {
     private String subtitleForMode() {
         switch (mode) {
             case STAFF_QUEUE:
-                return "Review requests assigned to your equipment group and confirm availability.";
+                return "New requests for your equipment group. Assign available quantities or request changes.";
             case ADMIN_REVIEW:
                 return "Review staff-assigned requests before they go to the campus director.";
             case DIRECTOR_REVIEW:
                 return "Final approval for requests ready for campus director review.";
             case SCHEDULE_ASSIGNMENT:
-                return "Manage approved assignments, releases, and equipment returns.";
+                return "Release approved equipment and inspect returns. Finished items move to Transaction history.";
             case TRANSACTION_HISTORY:
-                return "Equipment assignments and completed transaction records.";
+                return "Returned equipment and closed requests for your equipment group.";
             case ALL_REQUESTS:
             default:
                 return "Search and review request records across all statuses.";
@@ -441,9 +442,9 @@ public class RequestQueuePanel extends JPanel {
             case DIRECTOR_REVIEW:
                 return "There are no requests waiting for approval.";
             case SCHEDULE_ASSIGNMENT:
-                return "Approved assignments will appear here when they are ready to be scheduled.";
+                return "Nothing to release or receive. Requests appear here after final approval.";
             case TRANSACTION_HISTORY:
-                return "Equipment assignment transactions will appear here.";
+                return "Completed transactions will appear here.";
             case ALL_REQUESTS:
             default:
                 return "No request records have been submitted yet.";
