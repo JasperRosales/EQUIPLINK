@@ -285,7 +285,7 @@ public class RequestQueuePanel extends JPanel {
             boolean hasReleased = request.getEquipmentItems().stream()
                     .anyMatch(item -> isActorItem(item, "RELEASED"));
             if (hasAssigned) {
-                PrimaryButton release = new PrimaryButton("Release equipment");
+                PrimaryButton release = new PrimaryButton("Confirm release");
                 release.addActionListener(event -> updateTransaction(request, true));
                 actions.add(release);
             } else if (hasReleased) {

@@ -143,7 +143,7 @@ public final class ItemInspectionDialog {
 
         String title = switch (kind) {
             case ASSIGN -> "Assign equipment";
-            case RELEASE -> "Release equipment";
+            case RELEASE -> "Confirm release (deducts inventory)";
             case RETURN -> "Return inspection";
         };
         while (true) {

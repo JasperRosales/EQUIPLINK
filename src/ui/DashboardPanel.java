@@ -120,8 +120,8 @@ public class DashboardPanel extends JPanel {
                     "Scheduled for today", PURPLE);
             statCards[3] = new DashboardCard("In use", "—",
                     "Released today", ORANGE);
-            statCards[0].setClickAction(() -> openPage.accept("Equipment"));
-            statCards[1].setClickAction(() -> openPage.accept("Equipment"));
+            statCards[0].setClickAction(() -> openPage.accept("Inventory"));
+            statCards[1].setClickAction(() -> openPage.accept("Inventory"));
             statCards[2].setClickAction(() -> openPage.accept("Schedule & Assignment"));
             statCards[3].setClickAction(() -> openPage.accept("Schedule & Assignment"));
         } else if (isDirector()) {

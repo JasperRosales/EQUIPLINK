@@ -818,14 +818,34 @@ public class BorrowRequestService {
         Map<Long, ItemInspection> inputs = indexInspections(inspections);
         List<long[]> items = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT request_item_id, requested_equipment_id
-                FROM request_items
-                WHERE group_id = ? AND assigned_quantity > 0
+                SELECT ri.request_item_id, ri.requested_equipment_id,
+                       ri.assigned_equipment_id, ri.assigned_quantity, e.equipment_name
+                FROM request_items ri
+                JOIN equipment e ON e.equipment_id = ri.assigned_equipment_id
+                WHERE ri.group_id = ? AND ri.assigned_quantity > 0
+                ORDER BY ri.assigned_equipment_id
                 """)) {
             statement.setLong(1, groupId);
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) {
                     items.add(new long[] { result.getLong(1), result.getLong(2) });
+                    long assignedId = result.getLong(3);
+                    int quantity = result.getInt(4);
+                    String name = result.getString(5);
+                    // Final confirmation deducts stock; lock the item so concurrent
+                    // releases cannot hand out more units than are on hand.
+                    try (PreparedStatement lock = connection.prepareStatement(
+                            "SELECT 1 FROM equipment WHERE equipment_id = ? FOR UPDATE")) {
+                        lock.setLong(1, assignedId);
+                        lock.executeQuery().close();
+                    }
+                    int onHand = EquipmentService.findAvailableQuantity(
+                            connection, assignedId, null, null, null, null);
+                    if (quantity > onHand) {
+                        throw new IllegalArgumentException("Only " + onHand + " " + name
+                                + " on hand; " + quantity + " needed. Wait for returns "
+                                + "or adjust the assignment.");
+                    }
                 }
             }
         }
