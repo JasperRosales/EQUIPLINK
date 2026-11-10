@@ -81,9 +81,14 @@ public class BorrowRequestController {
         return requestService.findAllRequests();
     }
 
-    public List<BorrowRequest> findTransactionsForRole(User actor) throws Exception {
+    public List<BorrowRequest> findScheduleForRole(User actor) throws Exception {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
-        return requestService.findTransactionsForRole(actor.getRole());
+        return requestService.findScheduleForRole(actor.getRole());
+    }
+
+    public List<BorrowRequest> findHistoryForRole(User actor) throws Exception {
+        requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
+        return requestService.findHistoryForRole(actor.getRole());
     }
 
     public void assignStaffRequest(User actor, long requestId) throws Exception {

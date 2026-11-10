@@ -200,7 +200,7 @@ public class BorrowRequestService {
                     SELECT COUNT(DISTINCT br.request_id)
                     FROM borrow_requests br
                     JOIN request_groups rg ON rg.request_id = br.request_id
-                    WHERE br.status IN ('PENDING_STAFF', 'NEEDS_ACTION')
+                    WHERE br.status = 'PENDING_STAFF'
                       AND rg.custodian_role = ?
                       AND rg.status = 'PENDING'
                     """;
@@ -249,8 +249,10 @@ public class BorrowRequestService {
 
     public List<BorrowRequest> findStaffQueue(String role) throws SQLException {
         String normalizedRole = requireCustodianRole(role);
+        // NEEDS_ACTION requests wait on the borrower, so they leave every staff queue
+        // until the borrower resubmits.
         return findRequests("""
-                br.status IN ('PENDING_STAFF', 'NEEDS_ACTION')
+                br.status = 'PENDING_STAFF'
                 AND EXISTS (
                     SELECT 1
                     FROM request_groups rg
@@ -273,7 +275,11 @@ public class BorrowRequestService {
         return findRequests("br.request_id > 0");
     }
 
-    public List<BorrowRequest> findTransactionsForRole(String role) throws SQLException {
+    /**
+     * Active hand-overs for the role: approved requests whose equipment is ready to
+     * release, and released equipment still waiting to be returned.
+     */
+    public List<BorrowRequest> findScheduleForRole(String role) throws SQLException {
         String normalizedRole = requireCustodianRole(role);
         return findRequests("""
                 EXISTS (
@@ -282,8 +288,29 @@ public class BorrowRequestService {
                     WHERE rg.request_id = br.request_id
                       AND rg.custodian_role = ?
                       AND (
-                          rg.assigned_at IS NOT NULL
-                          OR rg.status IN ('ASSIGNED', 'RELEASED', 'RETURNED')
+                          (rg.status = 'ASSIGNED' AND br.status = 'APPROVED')
+                          OR rg.status = 'RELEASED'
+                      )
+                )
+                """, normalizedRole);
+    }
+
+    /**
+     * Finished transactions for the role: equipment that was returned, or assigned
+     * requests that were later rejected or cancelled.
+     */
+    public List<BorrowRequest> findHistoryForRole(String role) throws SQLException {
+        String normalizedRole = requireCustodianRole(role);
+        return findRequests("""
+                EXISTS (
+                    SELECT 1
+                    FROM request_groups rg
+                    WHERE rg.request_id = br.request_id
+                      AND rg.custodian_role = ?
+                      AND (
+                          rg.status = 'RETURNED'
+                          OR (br.status IN ('REJECTED', 'CANCELLED')
+                              AND rg.assigned_by IS NOT NULL)
                       )
                 )
                 """, normalizedRole);
