@@ -18,8 +18,13 @@ public class StatusBadge extends JLabel {
     private final Color tone;
 
     public StatusBadge(String status) {
-        super(UiSupport.displayStatus(status), SwingConstants.CENTER);
-        tone = UiSupport.statusColor(status);
+        this(UiSupport.displayStatus(status), UiSupport.statusColor(status));
+    }
+
+    /** Badge with custom text and color, e.g. a priority marker. */
+    public StatusBadge(String text, Color tone) {
+        super(text, SwingConstants.CENTER);
+        this.tone = tone;
         setFont(AppTheme.semibold(10.5f));
         setForeground(tone);
         setBorder(new EmptyBorder(3, 10, 3, 10));

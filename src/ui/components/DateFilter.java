@@ -47,6 +47,9 @@ public class DateFilter extends PrimaryButton {
 
     public DateFilter() {
         super("All dates", Style.SECONDARY);
+        setIcon(new ChevronIcon());
+        setHorizontalTextPosition(LEFT);
+        setIconTextGap(8);
         setToolTipText("Filter by event date");
         buildPopup();
         addActionListener(event -> {
@@ -236,7 +239,32 @@ public class DateFilter extends PrimaryButton {
     }
 
     private void updateText() {
-        setText((isActive() ? "Date: " : "") + label + "  ▾");
+        setText((isActive() ? "Date: " : "") + label);
         setForeground(isActive() ? AppTheme.primary() : AppTheme.foreground());
+    }
+
+    /** Small down chevron drawn in the button's text color. */
+    private final class ChevronIcon implements javax.swing.Icon {
+        @Override
+        public void paintIcon(java.awt.Component c, java.awt.Graphics graphics, int x, int y) {
+            java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(getForeground());
+            g.setStroke(new java.awt.BasicStroke(1.6f, java.awt.BasicStroke.CAP_ROUND,
+                    java.awt.BasicStroke.JOIN_ROUND));
+            g.drawPolyline(new int[] { x + 1, x + 5, x + 9 }, new int[] { y + 3, y + 7, y + 3 }, 3);
+            g.dispose();
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 10;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 10;
+        }
     }
 }

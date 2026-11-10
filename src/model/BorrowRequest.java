@@ -25,6 +25,11 @@ public class BorrowRequest {
     private final String remarks;
     private final LocalDateTime submittedAt;
     private final List<EquipmentRequestItem> equipmentItems;
+    private String borrowerType;
+
+    /** Faculty first, then everything else; stable for other orderings. */
+    public static final java.util.Comparator<BorrowRequest> PRIORITY_FIRST =
+            java.util.Comparator.comparing(request -> !request.isPriority());
 
     public BorrowRequest(
             long requestId,
@@ -78,4 +83,17 @@ public class BorrowRequest {
     public String getRemarks() { return remarks; }
     public LocalDateTime getSubmittedAt() { return submittedAt; }
     public List<EquipmentRequestItem> getEquipmentItems() { return equipmentItems; }
+
+    public String getBorrowerType() {
+        return borrowerType;
+    }
+
+    public void setBorrowerType(String borrowerType) {
+        this.borrowerType = borrowerType;
+    }
+
+    /** Faculty requests are processed with priority. */
+    public boolean isPriority() {
+        return "FACULTY".equalsIgnoreCase(borrowerType);
+    }
 }

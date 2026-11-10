@@ -42,6 +42,8 @@ public class RequestQueuePanel extends JPanel {
             new String[] { "Newest first", "Oldest first" });
     private final src.ui.components.DateFilter dateFilter =
             new src.ui.components.DateFilter();
+    private final javax.swing.JComboBox<String> priorityFilter = new javax.swing.JComboBox<>(
+            new String[] { "All borrowers", "Faculty (priority)", "Students" });
     private final JPanel requestList = new JPanel();
     private List<BorrowRequest> requests = List.of();
 
@@ -91,6 +93,11 @@ public class RequestQueuePanel extends JPanel {
         dateSort.setPreferredSize(new java.awt.Dimension(150, 40));
         dateSort.addActionListener(event -> showRequests());
         dateFilter.addChangeListener(this::showRequests);
+        priorityFilter.setFont(AppTheme.regular(12));
+        priorityFilter.setPreferredSize(new java.awt.Dimension(165, 40));
+        priorityFilter.setToolTipText("Filter by borrower type");
+        priorityFilter.addActionListener(event -> showRequests());
+        tools.add(priorityFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
@@ -143,6 +150,7 @@ public class RequestQueuePanel extends JPanel {
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
             if (dateFilter.matches(request.getEventDate())
+                    && matchesPriority(request)
                     && searchableText(request).contains(query)) {
                 filtered.add(request);
             }
@@ -151,13 +159,14 @@ public class RequestQueuePanel extends JPanel {
         if (dateSort.getSelectedIndex() == 0) {
             byDate = byDate.reversed();
         }
-        filtered.sort(byDate);
+        // Work queues serve faculty requests first; record views keep plain date order.
+        filtered.sort(isWorkQueue() ? BorrowRequest.PRIORITY_FIRST.thenComparing(byDate) : byDate);
 
         if (filtered.isEmpty()) {
             requestList.add(message(
                     requests.isEmpty()
                             ? emptyMessage()
-                            : "No requests match the current search or date filter.",
+                            : "No requests match the current search or filters.",
                     false));
         } else {
             for (BorrowRequest request : filtered) {
@@ -169,13 +178,30 @@ public class RequestQueuePanel extends JPanel {
         requestList.repaint();
     }
 
+    private boolean matchesPriority(BorrowRequest request) {
+        switch (priorityFilter.getSelectedIndex()) {
+            case 1:
+                return request.isPriority();
+            case 2:
+                return !request.isPriority();
+            default:
+                return true;
+        }
+    }
+
+    private boolean isWorkQueue() {
+        return mode == Mode.STAFF_QUEUE || mode == Mode.ADMIN_REVIEW
+                || mode == Mode.DIRECTOR_REVIEW || mode == Mode.SCHEDULE_ASSIGNMENT;
+    }
+
     private String searchableText(BorrowRequest request) {
         StringBuilder text = new StringBuilder()
                 .append(request.getRequestCode()).append(' ')
                 .append(request.getBorrowerName()).append(' ')
                 .append(request.getVenue()).append(' ')
                 .append(request.getPurpose()).append(' ')
-                .append(request.getStatus());
+                .append(request.getStatus()).append(' ')
+                .append(request.isPriority() ? "faculty priority" : "student");
         for (EquipmentRequestItem item : request.getEquipmentItems()) {
             text.append(' ').append(item.getEquipmentName())
                     .append(' ').append(item.getEquipmentCode());
@@ -198,7 +224,17 @@ public class RequestQueuePanel extends JPanel {
         code.setForeground(AppTheme.foreground());
         JLabel status = new src.ui.components.StatusBadge(request.getStatus());
         title.add(code, BorderLayout.CENTER);
-        title.add(status, BorderLayout.EAST);
+        if (request.isPriority()) {
+            JPanel badges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+            badges.setOpaque(false);
+            badges.add(new src.ui.components.StatusBadge(
+                    "Faculty · Priority", AppTheme.isDarkMode()
+                            ? new java.awt.Color(196, 181, 253) : new java.awt.Color(124, 58, 237)));
+            badges.add(status);
+            title.add(badges, BorderLayout.EAST);
+        } else {
+            title.add(status, BorderLayout.EAST);
+        }
 
         String equipment = equipmentSummary(request);
         JLabel meta = new JLabel(request.getVenue() + "  ·  "

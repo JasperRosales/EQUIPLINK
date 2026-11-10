@@ -88,12 +88,52 @@ public class AuthService {
                     "Please complete all required fields. Password must be at least 8 characters.");
         }
 
-        if (!"STUDENT".equalsIgnoreCase(borrowerType)
-                && !"FACULTY".equalsIgnoreCase(borrowerType)) {
+        if (!"STUDENT".equalsIgnoreCase(borrowerType)) {
 
             throw new IllegalArgumentException(
-                    "Borrower type must be STUDENT or FACULTY.");
+                    "Self-registration is for students. Faculty accounts are created by ICT.");
         }
+
+        insertBorrower(username, email, fullName, department, "STUDENT", password);
+    }
+
+    /** ICT creates faculty accounts, which receive priority request handling. */
+    public void createFacultyAccount(
+            String actorRole,
+            String username,
+            String email,
+            String fullName,
+            String department,
+            char[] password) throws Exception {
+        requireIctStaff(actorRole);
+        if (username == null || username.isBlank()
+                || email == null || email.isBlank()
+                || fullName == null || fullName.isBlank()
+                || password == null || password.length < 8) {
+            throw new IllegalArgumentException(
+                    "Complete name, username, and email. Password must be at least 8 characters.");
+        }
+        if (!email.trim().matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
+            throw new IllegalArgumentException("Enter a valid email address.");
+        }
+        try {
+            insertBorrower(username, email, fullName, department, "FACULTY", password);
+        } catch (java.sql.SQLException exception) {
+            if ("23505".equals(exception.getSQLState())) {
+                throw new IllegalArgumentException(
+                        "That username or email is already in use.");
+            }
+            throw exception;
+        }
+    }
+
+    private void insertBorrower(
+            String username,
+            String email,
+            String fullName,
+            String department,
+            String borrowerType,
+            char[] password) throws Exception {
 
         String salt = PasswordHasher.generateSalt();
 

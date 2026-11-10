@@ -39,6 +39,20 @@ public class AuthController {
                 password);
     }
 
+    public void createFacultyAccount(
+            User actor,
+            String username,
+            String email,
+            String fullName,
+            String department,
+            char[] password) throws Exception {
+        if (actor == null) {
+            throw new SecurityException("A signed-in account is required.");
+        }
+        authService.createFacultyAccount(
+                actor.getRole(), username, email, fullName, department, password);
+    }
+
     public void changePassword(
             long userId,
             char[] currentPassword,
