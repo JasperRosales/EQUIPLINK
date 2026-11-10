@@ -44,6 +44,8 @@ public class RequestQueuePanel extends JPanel {
             new src.ui.components.DateFilter();
     private final javax.swing.JComboBox<String> priorityFilter = new javax.swing.JComboBox<>(
             new String[] { "All borrowers", "Faculty (priority)", "Students" });
+    private final javax.swing.JComboBox<String> statusFilter = new javax.swing.JComboBox<>(
+            new String[] { "All statuses", "Approved", "Rejected", "Staff review", "Admin review" });
     private final JPanel requestList = new JPanel();
     private List<BorrowRequest> requests = List.of();
 
@@ -97,6 +99,11 @@ public class RequestQueuePanel extends JPanel {
         priorityFilter.setPreferredSize(new java.awt.Dimension(165, 40));
         priorityFilter.setToolTipText("Filter by borrower type");
         priorityFilter.addActionListener(event -> showRequests());
+        statusFilter.setFont(AppTheme.regular(12));
+        statusFilter.setPreferredSize(new java.awt.Dimension(160, 40));
+        statusFilter.setToolTipText("Filter by request status");
+        statusFilter.addActionListener(event -> showRequests());
+        tools.add(statusFilter);
         tools.add(priorityFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
@@ -151,6 +158,7 @@ public class RequestQueuePanel extends JPanel {
         for (BorrowRequest request : requests) {
             if (dateFilter.matches(request.getEventDate())
                     && matchesPriority(request)
+                    && matchesStatus(request)
                     && searchableText(request).contains(query)) {
                 filtered.add(request);
             }
@@ -184,6 +192,22 @@ public class RequestQueuePanel extends JPanel {
                 return request.isPriority();
             case 2:
                 return !request.isPriority();
+            default:
+                return true;
+        }
+    }
+
+    private boolean matchesStatus(BorrowRequest request) {
+        switch (statusFilter.getSelectedIndex()) {
+            case 1:
+                return "APPROVED".equals(request.getStatus());
+            case 2:
+                return "REJECTED".equals(request.getStatus());
+            case 3:
+                return "PENDING_STAFF".equals(request.getStatus())
+                        || "NEEDS_ACTION".equals(request.getStatus());
+            case 4:
+                return "PENDING_ADMIN".equals(request.getStatus());
             default:
                 return true;
         }
