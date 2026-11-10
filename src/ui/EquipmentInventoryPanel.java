@@ -324,6 +324,24 @@ public class EquipmentInventoryPanel extends JPanel {
     private JPanel equipmentCard(Equipment item) {
         SurfacePanel card = new SurfacePanel();
         card.setLayout(new BorderLayout(14, 8));
+        java.awt.Color baseBackground = card.getBackground();
+        card.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent event) {
+                card.setBackground(new java.awt.Color(0, 0, 128));
+                card.repaint();
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent event) {
+                java.awt.Point point = card.getMousePosition();
+                if (point != null && card.contains(point)) {
+                    return;
+                }
+                card.setBackground(baseBackground);
+                card.repaint();
+            }
+        });
         boolean usable = "AVAILABLE".equals(item.getStatus());
         int onHand = usable ? item.getAvailableQuantity() : 0;
 
