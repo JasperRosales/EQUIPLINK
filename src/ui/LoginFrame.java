@@ -43,8 +43,8 @@ public class LoginFrame extends JFrame {
 
         setTitle("EquipLink | Login");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(900, 600));
-        setSize(1040, 670);
+        setMinimumSize(new Dimension(900, 720));
+        setSize(1040, 760);
         setLocationRelativeTo(null);
 
         JPanel root = new JPanel(new BorderLayout());
@@ -76,14 +76,14 @@ public class LoginFrame extends JFrame {
         GlassCard glassCard = new GlassCard();
         glassCard.setLayout(new BorderLayout());
         glassCard.setBorder(new EmptyBorder(24, 22, 24, 22));
-        glassCard.setPreferredSize(new Dimension(420, 510));
+        glassCard.setPreferredSize(new Dimension(420, 630));
 
         // Form content
         JPanel form = new JPanel();
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         form.setOpaque(false);
         form.setBorder(new EmptyBorder(20, 18, 20, 18));
-        form.setPreferredSize(new Dimension(376, 460));
+        form.setPreferredSize(new Dimension(376, 580));
 
         JLabel eyebrow = new JLabel("WELCOME BACK");
         eyebrow.setFont(AppTheme.semibold(10.5f));
@@ -101,6 +101,14 @@ public class LoginFrame extends JFrame {
         subtitle.setFont(AppTheme.regular(12));
         subtitle.setForeground(AppTheme.muted());
         subtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        ImageIcon logoImage = BrandLogo.full(104);
+        if (logoImage != null) {
+            JLabel logo = new JLabel(logoImage);
+            logo.setAlignmentX(Component.LEFT_ALIGNMENT);
+            form.add(logo);
+            form.add(Box.createVerticalStrut(16));
+        }
 
         form.add(eyebrow);
         form.add(Box.createVerticalStrut(8));
