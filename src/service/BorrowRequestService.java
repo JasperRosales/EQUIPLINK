@@ -65,9 +65,12 @@ public class BorrowRequestService {
                 insertItems(connection, requestId, form, equipment, groupIds);
                 recordHistory(connection, requestId, null, borrowerId,
                         "SUBMITTED", null, "PENDING_STAFF", null);
+                boolean priority = isFacultyBorrower(connection, borrowerId);
                 notifyGroupStaff(connection, requestId, "PENDING",
-                        "New equipment request",
-                        "A new borrowing request is waiting for equipment processing.");
+                        priority ? "Priority: new faculty request" : "New equipment request",
+                        priority
+                                ? "A faculty borrowing request is waiting for equipment processing. Faculty requests are handled first."
+                                : "A new borrowing request is waiting for equipment processing.");
                 connection.commit();
                 return requestId;
             } catch (Exception exception) {
@@ -251,7 +254,7 @@ public class BorrowRequestService {
         String normalizedRole = requireCustodianRole(role);
         // NEEDS_ACTION requests wait on the borrower, so they leave every staff queue
         // until the borrower resubmits.
-        return findRequests("""
+        return prioritized(findRequests("""
                 br.status = 'PENDING_STAFF'
                 AND EXISTS (
                     SELECT 1
@@ -260,15 +263,21 @@ public class BorrowRequestService {
                       AND rg.custodian_role = ?
                       AND rg.status = 'PENDING'
                 )
-                """, normalizedRole);
+                """, normalizedRole));
     }
 
     public List<BorrowRequest> findAdminQueue() throws SQLException {
-        return findRequests("br.status = 'PENDING_ADMIN'");
+        return prioritized(findRequests("br.status = 'PENDING_ADMIN'"));
     }
 
     public List<BorrowRequest> findDirectorQueue() throws SQLException {
-        return findRequests("br.status = 'PENDING_DIRECTOR'");
+        return prioritized(findRequests("br.status = 'PENDING_DIRECTOR'"));
+    }
+
+    /** Orders faculty (priority) requests first, keeping the existing order otherwise. */
+    private static List<BorrowRequest> prioritized(List<BorrowRequest> requests) {
+        requests.sort(BorrowRequest.PRIORITY_FIRST);
+        return requests;
     }
 
     public List<BorrowRequest> findAllRequests() throws SQLException {
@@ -281,7 +290,7 @@ public class BorrowRequestService {
      */
     public List<BorrowRequest> findScheduleForRole(String role) throws SQLException {
         String normalizedRole = requireCustodianRole(role);
-        return findRequests("""
+        return prioritized(findRequests("""
                 EXISTS (
                     SELECT 1
                     FROM request_groups rg
@@ -292,7 +301,7 @@ public class BorrowRequestService {
                           OR rg.status = 'RELEASED'
                       )
                 )
-                """, normalizedRole);
+                """, normalizedRole));
     }
 
     /**
@@ -953,6 +962,17 @@ public class BorrowRequestService {
         return trimmed.length() > max ? trimmed.substring(0, max) : trimmed;
     }
 
+    private boolean isFacultyBorrower(Connection connection, long borrowerId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT borrower_type FROM users WHERE user_id = ?")) {
+            statement.setLong(1, borrowerId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() && "FACULTY".equals(result.getString(1));
+            }
+        }
+    }
+
     private void notifyRole(
             Connection connection, String role, long requestId, String title, String message)
             throws SQLException {
@@ -1032,7 +1052,7 @@ public class BorrowRequestService {
             throws SQLException {
         String sql = """
                 SELECT br.request_id, br.request_code, br.borrower_id,
-                       u.full_name AS borrower_name, br.venue, br.event_date,
+                       u.full_name AS borrower_name, u.borrower_type, br.venue, br.event_date,
                        br.start_time, br.end_time, br.purpose, br.participants,
                        br.person_in_charge, br.position, br.status, br.remarks,
                        br.submitted_at,
@@ -1456,8 +1476,10 @@ public class BorrowRequestService {
         private final String remarks;
         private final LocalDateTime submittedAt;
         private final List<EquipmentRequestItem> items = new ArrayList<>();
+        private final String borrowerType;
 
         private BorrowRequestBuilder(ResultSet result) throws SQLException {
+            borrowerType = result.getString("borrower_type");
             requestId = result.getLong("request_id");
             requestCode = result.getString("request_code");
             borrowerId = result.getLong("borrower_id");
@@ -1476,10 +1498,12 @@ public class BorrowRequestService {
         }
 
         private BorrowRequest build() {
-            return new BorrowRequest(
+            BorrowRequest request = new BorrowRequest(
                     requestId, requestCode, borrowerId, borrowerName, venue,
                     eventDate, startTime, endTime, purpose, participants,
                     personInCharge, position, status, remarks, submittedAt, items);
+            request.setBorrowerType(borrowerType);
+            return request;
         }
     }
 

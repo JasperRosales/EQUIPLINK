@@ -48,12 +48,26 @@ public class UserManagementPanel extends JPanel {
         title.setFont(AppTheme.semibold(18));
         title.setForeground(AppTheme.foreground());
         JLabel subtitle = new JLabel(
-                "Monitor faculty and student accounts; filter students by department.");
+                "Students self-register. Faculty accounts are created here and get priority handling.");
         subtitle.setFont(AppTheme.regular(11));
         subtitle.setForeground(AppTheme.muted());
-        add(title);
-        add(Box.createVerticalStrut(4));
-        add(subtitle);
+        JPanel titleBar = new JPanel(new BorderLayout(12, 0));
+        titleBar.setOpaque(false);
+        JPanel titles = new JPanel();
+        titles.setOpaque(false);
+        titles.setLayout(new BoxLayout(titles, BoxLayout.Y_AXIS));
+        titles.add(title);
+        titles.add(Box.createVerticalStrut(4));
+        titles.add(subtitle);
+        titleBar.add(titles, BorderLayout.CENTER);
+        src.ui.components.PrimaryButton createFaculty =
+                new src.ui.components.PrimaryButton("Create faculty account");
+        createFaculty.addActionListener(event -> createFacultyAccount());
+        JPanel actionWrap = new JPanel(new java.awt.GridBagLayout());
+        actionWrap.setOpaque(false);
+        actionWrap.add(createFaculty);
+        titleBar.add(actionWrap, BorderLayout.EAST);
+        add(titleBar);
         add(Box.createVerticalStrut(12));
 
         JPanel filters = new JPanel(new BorderLayout(8, 0));
@@ -183,6 +197,94 @@ public class UserManagementPanel extends JPanel {
         card.add(detail, BorderLayout.CENTER);
         card.add(status, BorderLayout.EAST);
         return card;
+    }
+
+    private void createFacultyAccount() {
+        JTextField fullName = new JTextField(24);
+        JTextField username = new JTextField(24);
+        JTextField email = new JTextField(24);
+        JTextField departmentField = new JTextField(24);
+        JTextField password = new JTextField(generatePassword(), 24);
+        password.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 13));
+        src.ui.components.PrimaryButton generate = new src.ui.components.PrimaryButton(
+                "Generate", src.ui.components.PrimaryButton.Style.SECONDARY);
+        generate.addActionListener(event -> password.setText(generatePassword()));
+
+        JPanel form = new JPanel(new java.awt.GridBagLayout());
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.insets = new java.awt.Insets(5, 4, 5, 4);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        Object[][] rows = {
+                { "Full name", fullName }, { "Username", username },
+                { "Email address", email }, { "Department", departmentField },
+                { "Temporary password", password } };
+        for (int i = 0; i < rows.length; i++) {
+            c.gridy = i;
+            c.gridx = 0;
+            c.weightx = 0;
+            JLabel label = new JLabel((String) rows[i][0]);
+            label.setFont(AppTheme.semibold(12));
+            form.add(label, c);
+            c.gridx = 1;
+            c.weightx = 1;
+            form.add((java.awt.Component) rows[i][1], c);
+        }
+        c.gridx = 2;
+        c.weightx = 0;
+        form.add(generate, c);
+        c.gridy = rows.length;
+        c.gridx = 0;
+        c.gridwidth = 3;
+        JLabel note = new JLabel(
+                "Share the temporary password with the faculty member; they can change it in Settings.");
+        note.setFont(AppTheme.regular(11));
+        note.setForeground(AppTheme.muted());
+        form.add(note, c);
+
+        while (true) {
+            int answer = javax.swing.JOptionPane.showConfirmDialog(
+                    this, form, "Create faculty account",
+                    javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                    javax.swing.JOptionPane.PLAIN_MESSAGE);
+            if (answer != javax.swing.JOptionPane.OK_OPTION) {
+                return;
+            }
+            String temporary = password.getText().trim();
+            try {
+                authController.createFacultyAccount(
+                        actor, username.getText(), email.getText(), fullName.getText(),
+                        departmentField.getText(), temporary.toCharArray());
+            } catch (Exception exception) {
+                javax.swing.JOptionPane.showMessageDialog(this,
+                        messageOf(exception), "Unable to create account",
+                        javax.swing.JOptionPane.WARNING_MESSAGE);
+                continue;
+            }
+            JTextField shown = new JTextField(temporary);
+            shown.setEditable(false);
+            JPanel done = new JPanel(new BorderLayout(0, 8));
+            done.add(new JLabel("Faculty account created for " + fullName.getText().trim()
+                    + " (" + username.getText().trim() + ")."), BorderLayout.NORTH);
+            done.add(shown, BorderLayout.CENTER);
+            done.add(new JLabel("Temporary password, copy it now; it won't be shown again."),
+                    BorderLayout.SOUTH);
+            javax.swing.JOptionPane.showMessageDialog(this, done, "Account created",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            borrowerType.setSelectedItem("Faculty");
+            loadUsers();
+            return;
+        }
+    }
+
+    private static String generatePassword() {
+        String alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder value = new StringBuilder();
+        for (int i = 0; i < 12; i++) {
+            value.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return value.toString();
     }
 
     private JPanel message(String text, boolean error) {

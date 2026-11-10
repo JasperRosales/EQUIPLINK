@@ -92,7 +92,7 @@ public class LoginFrame extends JFrame {
 
         JLabel heading = new JLabel("Sign in to your account");
         heading.setFont(AppTheme.semibold(24));
-        heading.setForeground(NAVY);
+        heading.setForeground(AppTheme.foreground());
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel subtitle = new JLabel(
@@ -137,7 +137,7 @@ public class LoginFrame extends JFrame {
         );
 
         securityHint.setFont(AppTheme.regular(10.5f));
-        securityHint.setForeground(new Color(125, 140, 163));
+        securityHint.setForeground(AppTheme.muted());
 
         JButton forgotPassword = new JButton("Forgot password?");
         styleLink(forgotPassword);
@@ -185,10 +185,10 @@ public class LoginFrame extends JFrame {
 
         JLabel prompt = new JLabel("New to EquipLink?");
         prompt.setFont(AppTheme.regular(10));
-        prompt.setForeground(new Color(115, 130, 151));
+        prompt.setForeground(AppTheme.muted());
 
         JButton register = new JButton(
-                "Create a borrower account"
+                "Create a student account"
         );
 
         styleLink(register);
@@ -234,7 +234,7 @@ public class LoginFrame extends JFrame {
         JLabel fieldLabel = new JLabel(label);
 
         fieldLabel.setFont(AppTheme.semibold(10));
-        fieldLabel.setForeground(NAVY);
+        fieldLabel.setForeground(AppTheme.foreground());
         fieldLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         styleGlassInput(field);

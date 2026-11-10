@@ -33,7 +33,7 @@ public class RegisterFrame extends JDialog {
     private final JTextField fullName = new JTextField();
     private final JTextField department = new JTextField();
     private final JComboBox<String> type = new JComboBox<>(
-            new String[] { "STUDENT", "FACULTY" });
+            new String[] { "STUDENT" });
     private final JPasswordField password = new JPasswordField();
     private final JPasswordField confirmPassword = new JPasswordField();
     private final PrimaryButton createButton = new PrimaryButton("Create account");
@@ -75,7 +75,8 @@ public class RegisterFrame extends JDialog {
         heading.setFont(AppTheme.semibold(23));
         heading.setForeground(AppTheme.foreground());
         heading.setAlignmentX(LEFT_ALIGNMENT);
-        JLabel subtitle = new JLabel("A few details and you're ready to borrow.");
+        JLabel subtitle = new JLabel(
+                "Student accounts only. Faculty accounts are created by ICT.");
         subtitle.setFont(AppTheme.regular(11));
         subtitle.setForeground(AppTheme.muted());
         subtitle.setAlignmentX(LEFT_ALIGNMENT);
@@ -91,7 +92,6 @@ public class RegisterFrame extends JDialog {
         addField(form, "Username", username);
         addField(form, "Email address", email);
         addField(form, "Department / course (optional)", department);
-        addField(form, "Account type", type);
         addField(form, "Password (at least 8 characters)", password);
         addField(form, "Confirm password", confirmPassword);
 

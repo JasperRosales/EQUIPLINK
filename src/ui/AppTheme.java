@@ -36,11 +36,11 @@ public final class AppTheme {
     }
 
     public static Color foreground() {
-        return darkMode ? new Color(241, 245, 249) : new Color(15, 23, 42);
+        return darkMode ? new Color(248, 250, 252) : new Color(15, 23, 42);
     }
 
     public static Color muted() {
-        return darkMode ? new Color(148, 163, 184) : new Color(100, 116, 139);
+        return darkMode ? new Color(203, 213, 225) : new Color(100, 116, 139);
     }
 
     public static Color border() {
@@ -110,6 +110,35 @@ public final class AppTheme {
         javax.swing.UIManager.put("TableHeader.height", 36);
         javax.swing.UIManager.put("TitlePane.unifiedBackground", true);
         installAlignmentFix();
+        java.util.Map<String, String> extras = new java.util.HashMap<>();
+        if (darkMode) {
+            // Match EquipLink's slate surfaces and keep all text white in dark mode.
+            String surface = "#161f32";
+            String text = "#f8fafc";
+            for (String component : new String[] {
+                    "ComboBox", "TextField", "PasswordField", "FormattedTextField",
+                    "TextArea", "Spinner", "List", "PopupMenu", "MenuItem", "Button",
+                    "ToggleButton", "Table", "EditorPane", "TextPane" }) {
+                extras.put(component + ".background", surface);
+                extras.put(component + ".foreground", text);
+            }
+            extras.put("ComboBox.buttonBackground", surface);
+            extras.put("ComboBox.buttonEditableBackground", surface);
+            extras.put("ComboBox.popupBackground", surface);
+            extras.put("ComboBox.selectionForeground", text);
+            extras.put("Spinner.buttonBackground", surface);
+            extras.put("Component.borderColor", "#2d3a52");
+            extras.put("Component.disabledBorderColor", "#2d3a52");
+            extras.put("Panel.background", "#0b1120");
+            extras.put("OptionPane.background", surface);
+            extras.put("Label.foreground", text);
+            extras.put("CheckBox.foreground", text);
+            extras.put("RadioButton.foreground", text);
+            extras.put("TitledBorder.titleColor", text);
+            extras.put("TableHeader.foreground", text);
+            extras.put("TextComponent.placeholderForeground", "#94a3b8");
+        }
+        com.formdev.flatlaf.FlatLaf.setGlobalExtraDefaults(extras);
         if (darkMode) {
             com.formdev.flatlaf.FlatDarkLaf.setup();
         } else {
