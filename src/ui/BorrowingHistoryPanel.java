@@ -23,6 +23,10 @@ public class BorrowingHistoryPanel extends JPanel {
     private final BorrowRequestController requestController;
     private final JPanel historyList = new JPanel();
 
+    private final src.ui.components.DateFilter dateFilter =
+            new src.ui.components.DateFilter();
+    private List<BorrowRequest> loaded = List.of();
+
     public BorrowingHistoryPanel(long borrowerId, BorrowRequestController requestController) {
         this.borrowerId = borrowerId;
         this.requestController = requestController;
@@ -36,9 +40,21 @@ public class BorrowingHistoryPanel extends JPanel {
         JLabel hint = new JLabel("Completed, cancelled, and declined equipment requests.");
         hint.setFont(AppTheme.regular(11));
         hint.setForeground(AppTheme.muted());
-        add(heading);
-        add(Box.createVerticalStrut(4));
-        add(hint);
+        JPanel titleBar = new JPanel(new BorderLayout(12, 0));
+        titleBar.setOpaque(false);
+        JPanel titles = new JPanel();
+        titles.setOpaque(false);
+        titles.setLayout(new BoxLayout(titles, BoxLayout.Y_AXIS));
+        titles.add(heading);
+        titles.add(Box.createVerticalStrut(4));
+        titles.add(hint);
+        titleBar.add(titles, BorderLayout.CENTER);
+        dateFilter.addChangeListener(() -> showHistory(loaded));
+        JPanel filterWrap = new JPanel(new java.awt.GridBagLayout());
+        filterWrap.setOpaque(false);
+        filterWrap.add(dateFilter);
+        titleBar.add(filterWrap, BorderLayout.EAST);
+        add(titleBar);
         add(Box.createVerticalStrut(14));
 
         historyList.setOpaque(false);
@@ -72,11 +88,19 @@ public class BorrowingHistoryPanel extends JPanel {
         }.execute();
     }
 
-    private void showHistory(List<BorrowRequest> requests) {
+    private void showHistory(List<BorrowRequest> all) {
+        loaded = all;
+        List<BorrowRequest> requests = new java.util.ArrayList<>();
+        for (BorrowRequest request : all) {
+            if (dateFilter.matches(request.getEventDate())) {
+                requests.add(request);
+            }
+        }
         historyList.removeAll();
         if (requests.isEmpty()) {
-            historyList.add(message(
-                    "Past borrowing records will appear here after a request is completed or closed.",
+            historyList.add(message(all.isEmpty()
+                    ? "Past borrowing records will appear here after a request is completed or closed."
+                    : "No records match the selected dates.",
                     false));
         } else {
             for (BorrowRequest request : requests) {

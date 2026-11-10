@@ -32,6 +32,8 @@ public class MyRequestsPanel extends JPanel {
     private final Runnable changedHandler;
     private final JPanel requestCards = new JPanel();
     private final JTextField search = new JTextField(22);
+    private final src.ui.components.DateFilter dateFilter =
+            new src.ui.components.DateFilter();
     private final JComboBox<String> dateSort = new JComboBox<>(
             new String[] { "Newest first", "Oldest first" });
     private final String statusFilter;
@@ -69,11 +71,18 @@ public class MyRequestsPanel extends JPanel {
         JPanel filters = new JPanel(new BorderLayout(8, 0));
         filters.setOpaque(false);
         UiSupport.styleInput(search);
+        search.putClientProperty("JTextField.placeholderText", "Search by code, venue, or equipment");
         search.getDocument().addDocumentListener(UiSupport.documentListener(this::showRequests));
         filters.add(search, BorderLayout.CENTER);
-        dateSort.setFont(AppTheme.regular(10));
+        dateSort.setFont(AppTheme.regular(12));
+        dateSort.setPreferredSize(new java.awt.Dimension(150, 40));
         dateSort.addActionListener(event -> showRequests());
-        filters.add(dateSort, BorderLayout.EAST);
+        dateFilter.addChangeListener(this::showRequests);
+        JPanel tools = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
+        tools.setOpaque(false);
+        tools.add(dateFilter);
+        tools.add(dateSort);
+        filters.add(tools, BorderLayout.EAST);
         add(filters);
         add(Box.createVerticalStrut(12));
 
@@ -114,7 +123,8 @@ public class MyRequestsPanel extends JPanel {
         String query = search.getText().trim().toLowerCase();
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
-            if (matchesFilter(request) && searchableText(request).contains(query)) {
+            if (matchesFilter(request) && dateFilter.matches(request.getEventDate())
+                    && searchableText(request).contains(query)) {
                 filtered.add(request);
             }
         }
