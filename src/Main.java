@@ -22,6 +22,8 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
 
+        SwingUtilities.invokeAndWait(src.ui.AppTheme::install);
+
         try {
 
             DatabaseInitializer.initializeDatabase();

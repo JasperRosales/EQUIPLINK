@@ -12,6 +12,10 @@ public class EquipmentRequestItem {
     private final int returnedQuantity;
     private final String custodianRole;
     private final String groupStatus;
+    private final int damagedQuantity;
+    private final int missingQuantity;
+    private final String conditionBefore;
+    private final String conditionAfter;
 
     public EquipmentRequestItem(
             long equipmentId,
@@ -38,6 +42,30 @@ public class EquipmentRequestItem {
             int returnedQuantity,
             String custodianRole,
             String groupStatus) {
+        this(equipmentId, equipmentCode, equipmentName, category,
+                requestedQuantity, assignedQuantity, releasedQuantity, returnedQuantity,
+                custodianRole, groupStatus, 0, 0, null, null);
+    }
+
+    public EquipmentRequestItem(
+            long equipmentId,
+            String equipmentCode,
+            String equipmentName,
+            String category,
+            int requestedQuantity,
+            int assignedQuantity,
+            int releasedQuantity,
+            int returnedQuantity,
+            String custodianRole,
+            String groupStatus,
+            int damagedQuantity,
+            int missingQuantity,
+            String conditionBefore,
+            String conditionAfter) {
+        this.damagedQuantity = damagedQuantity;
+        this.missingQuantity = missingQuantity;
+        this.conditionBefore = conditionBefore;
+        this.conditionAfter = conditionAfter;
         this.equipmentId = equipmentId;
         this.equipmentCode = equipmentCode;
         this.equipmentName = equipmentName;
@@ -60,4 +88,8 @@ public class EquipmentRequestItem {
     public int getReturnedQuantity() { return returnedQuantity; }
     public String getCustodianRole() { return custodianRole; }
     public String getGroupStatus() { return groupStatus; }
+    public int getDamagedQuantity() { return damagedQuantity; }
+    public int getMissingQuantity() { return missingQuantity; }
+    public String getConditionBefore() { return conditionBefore; }
+    public String getConditionAfter() { return conditionAfter; }
 }

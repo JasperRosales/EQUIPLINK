@@ -333,10 +333,11 @@ public class EquipmentService {
                     - COALESCE((
                         SELECT SUM(
                             CASE
-                                WHEN br.status = 'RELEASED'
-                                    THEN GREATEST(ri.released_quantity - ri.returned_quantity, 0)
-                                WHEN br.status = 'APPROVED' AND ri.assigned_quantity > 0
-                                    THEN GREATEST(ri.assigned_quantity - ri.returned_quantity, 0)
+                                WHEN rg.status IN ('RELEASED', 'RETURNED')
+                                    THEN GREATEST(ri.released_quantity - ri.returned_quantity
+                                            - ri.missing_quantity, 0)
+                                WHEN rg.status = 'ASSIGNED'
+                                    THEN ri.assigned_quantity
                                 ELSE ri.requested_quantity
                             END
                         )

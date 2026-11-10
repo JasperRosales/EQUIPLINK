@@ -75,7 +75,7 @@ public class EquipmentInventoryPanel extends JPanel {
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0));
         actions.setOpaque(false);
         if (canManageInventory()) {
-            PrimaryButton addButton = new PrimaryButton("[+] Add equipment");
+            PrimaryButton addButton = new PrimaryButton("Add equipment");
             addButton.addActionListener(event -> showEquipmentEditor(null));
             actions.add(addButton);
         }
@@ -167,10 +167,10 @@ public class EquipmentInventoryPanel extends JPanel {
                 ? AppTheme.success() : AppTheme.warning());
         JLabel condition = new JLabel(
                 "Damaged " + item.getDamagedQuantity() + "  ·  Lost " + item.getLostQuantity());
-        condition.setFont(AppTheme.regular(9));
+        condition.setFont(AppTheme.regular(10.5f));
         condition.setForeground(AppTheme.muted());
         JLabel status = new JLabel(item.getStatus().replace('_', ' '));
-        status.setFont(AppTheme.semibold(9));
+        status.setFont(AppTheme.semibold(10.5f));
         status.setForeground("AVAILABLE".equals(item.getStatus())
                 ? AppTheme.success() : AppTheme.warning());
         right.add(availability);

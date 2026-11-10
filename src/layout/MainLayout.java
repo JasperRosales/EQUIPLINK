@@ -129,27 +129,29 @@ public class MainLayout extends JPanel {
                 mainPanel.setBackground(AppTheme.background());
                 header = new JPanel(new BorderLayout(18, 0));
                 header.setBackground(AppTheme.surface());
-                header.setBorder(new EmptyBorder(18, 30, 18, 28));
-                header.setPreferredSize(new Dimension(0, 94));
+                header.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
+                                new EmptyBorder(14, 30, 14, 28)));
+                header.setPreferredSize(new Dimension(0, 84));
 
                 JPanel pageLabels = new JPanel();
                 pageLabels.setOpaque(false);
                 pageLabels.setLayout(new BoxLayout(pageLabels, BoxLayout.Y_AXIS));
                 pageTitle = new JLabel("Dashboard");
-                pageTitle.setFont(AppTheme.semibold(19));
+                pageTitle.setFont(AppTheme.semibold(20));
                 pageTitle.setForeground(AppTheme.foreground());
                 pageDescription = new JLabel("");
-                pageDescription.setFont(AppTheme.regular(11));
+                pageDescription.setFont(AppTheme.regular(12));
                 pageDescription.setForeground(AppTheme.muted());
                 pageLabels.add(pageTitle);
-                pageLabels.add(Box.createVerticalStrut(4));
+                pageLabels.add(Box.createVerticalStrut(2));
                 pageLabels.add(pageDescription);
                 header.add(pageLabels, BorderLayout.WEST);
                 header.add(createHeaderActions(userName, userRole), BorderLayout.EAST);
 
                 pageContainer = new JPanel(new BorderLayout());
                 pageContainer.setBackground(AppTheme.background());
-                pageContainer.setBorder(new EmptyBorder(22, 28, 22, 28));
+                pageContainer.setBorder(new EmptyBorder(24, 30, 24, 30));
                 mainPanel.add(header, BorderLayout.NORTH);
                 mainPanel.add(pageContainer, BorderLayout.CENTER);
 
@@ -161,32 +163,37 @@ public class MainLayout extends JPanel {
         private JPanel createSidebarTop(String systemName, String[] navigationItems) {
                 JPanel top = new JPanel();
                 top.setBackground(AppTheme.sidebar());
-                top.setBorder(new EmptyBorder(24, 17, 15, 12));
+                top.setBorder(new EmptyBorder(22, 14, 15, 14));
                 top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 
-                JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 11, 0));
+                JPanel brand = new JPanel(new BorderLayout(11, 0));
                 brand.setOpaque(false);
                 brand.setAlignmentX(LEFT_ALIGNMENT);
-                JLabel logo = new JLabel("EL", SwingConstants.CENTER);
-                logo.setPreferredSize(new Dimension(38, 38));
+                brand.setBorder(new EmptyBorder(0, 6, 0, 0));
+                brand.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+                JLabel logo = new src.ui.components.Avatar("EL", AppTheme.primary(), 10);
+                logo.setPreferredSize(new Dimension(36, 36));
                 logo.setFont(AppTheme.semibold(12));
-                logo.setForeground(Color.WHITE);
-                logo.setOpaque(true);
-                logo.setBackground(AppTheme.primary());
-                logo.setBorder(new EmptyBorder(6, 8, 6, 8));
-                logo.setHorizontalAlignment(SwingConstants.CENTER);
+                JPanel brandText = new JPanel(new java.awt.GridLayout(2, 1));
+                brandText.setOpaque(false);
                 JLabel name = new JLabel(systemName);
-                name.setFont(AppTheme.semibold(17));
+                name.setFont(AppTheme.semibold(16));
                 name.setForeground(Color.WHITE);
-                brand.add(logo);
-                brand.add(name);
+                JLabel tagline = new JLabel("Campus Equipment System");
+                tagline.setFont(AppTheme.regular(10));
+                tagline.setForeground(new Color(148, 163, 184));
+                brandText.add(name);
+                brandText.add(tagline);
+                brand.add(logo, BorderLayout.WEST);
+                brand.add(brandText, BorderLayout.CENTER);
                 top.add(brand);
-                top.add(Box.createVerticalStrut(32));
+                top.add(Box.createVerticalStrut(28));
 
-                JLabel menuLabel = new JLabel("WORKSPACE");
-                menuLabel.setFont(AppTheme.semibold(9));
-                menuLabel.setForeground(new Color(136, 153, 179));
-                menuLabel.setBorder(new EmptyBorder(0, 3, 10, 0));
+                JLabel menuLabel = new JLabel("MENU");
+                menuLabel.setFont(AppTheme.semibold(10));
+                menuLabel.setForeground(new Color(100, 116, 139));
+                menuLabel.setBorder(new EmptyBorder(0, 14, 8, 0));
+                menuLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
                 menuLabel.setAlignmentX(LEFT_ALIGNMENT);
                 top.add(menuLabel);
 
@@ -211,24 +218,25 @@ public class MainLayout extends JPanel {
 
         private JPanel createProfile(String name, String role) {
                 JPanel profile = new JPanel(new BorderLayout(10, 0));
-                profile.setBackground(new Color(17, 26, 45));
-                profile.setBorder(new EmptyBorder(14, 17, 15, 17));
-                JLabel initials = new JLabel(initials(name), SwingConstants.CENTER);
+                profile.setBackground(AppTheme.sidebar());
+                profile.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                                javax.swing.BorderFactory.createMatteBorder(
+                                                1, 0, 0, 0, new Color(30, 41, 59)),
+                                new EmptyBorder(14, 18, 16, 16)));
+                JLabel initials = new src.ui.components.Avatar(
+                                initials(name), new Color(51, 65, 85), 999);
                 initials.setFont(AppTheme.semibold(11));
-                initials.setForeground(Color.WHITE);
-                initials.setOpaque(true);
-                initials.setBackground(new Color(65, 87, 124));
-                initials.setPreferredSize(new Dimension(38, 38));
+                initials.setPreferredSize(new Dimension(36, 36));
 
                 JPanel identity = new JPanel();
                 identity.setOpaque(false);
                 identity.setLayout(new BoxLayout(identity, BoxLayout.Y_AXIS));
                 JLabel profileName = new JLabel(name);
-                profileName.setFont(AppTheme.semibold(10));
+                profileName.setFont(AppTheme.semibold(11.5f));
                 profileName.setForeground(Color.WHITE);
                 JLabel profileRole = new JLabel(role);
-                profileRole.setFont(AppTheme.regular(9));
-                profileRole.setForeground(new Color(160, 176, 199));
+                profileRole.setFont(AppTheme.regular(10.5f));
+                profileRole.setForeground(new Color(148, 163, 184));
                 identity.add(profileName);
                 identity.add(Box.createVerticalStrut(3));
                 identity.add(profileRole);
@@ -237,8 +245,9 @@ public class MainLayout extends JPanel {
 
                 JButton logout = new JButton("Log out");
                 logout.setToolTipText("Log out");
-                logout.setFont(AppTheme.regular(8));
-                logout.setForeground(new Color(195, 207, 225));
+                logout.setFont(AppTheme.semibold(10.5f));
+                logout.setForeground(new Color(203, 213, 225));
+                logout.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
                 logout.setIconTextGap(4);
                 logout.setBorder(new EmptyBorder(3, 0, 3, 0));
                 logout.setContentAreaFilled(false);
@@ -253,7 +262,7 @@ public class MainLayout extends JPanel {
         }
 
         private JPanel createHeaderActions(String name, String role) {
-                JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 5));
+                JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 2));
                 actions.setOpaque(false);
                 notificationButton = new PrimaryButton("Notifications",
                                 PrimaryButton.Style.SECONDARY);
@@ -261,13 +270,17 @@ public class MainLayout extends JPanel {
                 notificationButton.addActionListener(event -> showPage("Notifications"));
                 actions.add(notificationButton);
 
-                JPanel roleBadge = new JPanel(new GridLayout(0, 1, 0, 2));
+                javax.swing.JSeparator divider = new javax.swing.JSeparator(SwingConstants.VERTICAL);
+                divider.setPreferredSize(new Dimension(1, 30));
+                actions.add(divider);
+                actions.add(new src.ui.components.Avatar(initials(name), AppTheme.primary(), 999));
+                JPanel roleBadge = new JPanel(new GridLayout(0, 1, 0, 1));
                 roleBadge.setOpaque(false);
                 headerUserName = new JLabel(name);
-                headerUserName.setFont(AppTheme.semibold(10));
+                headerUserName.setFont(AppTheme.semibold(12));
                 headerUserName.setForeground(AppTheme.foreground());
                 headerUserRole = new JLabel(role);
-                headerUserRole.setFont(AppTheme.regular(9));
+                headerUserRole.setFont(AppTheme.regular(10.5f));
                 headerUserRole.setForeground(AppTheme.muted());
                 roleBadge.add(headerUserName);
                 roleBadge.add(headerUserRole);
@@ -316,7 +329,7 @@ public class MainLayout extends JPanel {
         private static String displayRole(String role) {
                 switch (normalizeRole(role)) {
                         case "BORROWER":
-                                return "User";
+                                return "Borrower";
                         case "ICT_STAFF":
                                 return "System Admin";
                         case "FACILITY_STAFF":
@@ -506,7 +519,7 @@ public class MainLayout extends JPanel {
         private String pageDescriptionFor(String item) {
                 switch (item) {
                         case "Dashboard":
-                                return "";
+                                return "Overview of your EquipLink activity";
                         case "Request Equipment":
                                 return "Create a request using live campus inventory";
                         case "My Requests":
@@ -554,6 +567,9 @@ public class MainLayout extends JPanel {
                 mainPanel.setBackground(background);
                 pageContainer.setBackground(background);
                 header.setBackground(surface);
+                header.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
+                                new EmptyBorder(14, 30, 14, 28)));
                 navigationPanel.setBackground(AppTheme.sidebar());
                 pageTitle.setForeground(AppTheme.foreground());
                 pageDescription.setForeground(AppTheme.muted());

@@ -23,10 +23,11 @@ public class NavigationButton extends JButton {
 
         setHorizontalAlignment(LEFT);
 
-        setFont(AppTheme.regular(12));
-        setForeground(new Color(218, 226, 238));
+        setFont(AppTheme.regular(12.5f));
+        setForeground(new Color(203, 213, 225));
 
-        setBorder(new EmptyBorder(10, 3, 10, 8));
+        setBorder(new EmptyBorder(9, 14, 9, 10));
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
         setFocusPainted(false);
         setBorderPainted(false);
@@ -35,12 +36,12 @@ public class NavigationButton extends JButton {
 
         // Allow button to occupy the available sidebar width
         setMaximumSize(
-                new java.awt.Dimension(Integer.MAX_VALUE, 43));
+                new java.awt.Dimension(Integer.MAX_VALUE, 40));
 
         // Keep the preferred width within the sidebar's inner width so
         // BoxLayout can stretch the button to fill it without overflowing.
         setPreferredSize(
-                new java.awt.Dimension(200, 43));
+                new java.awt.Dimension(200, 40));
 
         setAlignmentX(LEFT_ALIGNMENT);
 
@@ -67,12 +68,12 @@ public class NavigationButton extends JButton {
         setForeground(
                 active
                         ? Color.WHITE
-                        : new Color(195, 207, 225));
+                        : new Color(203, 213, 225));
 
         setFont(
                 active
-                        ? AppTheme.semibold(12)
-                        : AppTheme.regular(12));
+                        ? AppTheme.semibold(12.5f)
+                        : AppTheme.regular(12.5f));
 
         repaint();
     }
@@ -89,7 +90,7 @@ public class NavigationButton extends JButton {
         // Active navigation background
         if (active) {
 
-            g.setColor(new Color(54, 75, 110));
+            g.setColor(new Color(255, 255, 255, 22));
 
             g.fillRoundRect(
                     0,
@@ -113,7 +114,7 @@ public class NavigationButton extends JButton {
         } else if (hovered) {
 
             // Hover background
-            g.setColor(new Color(255, 255, 255, 15));
+            g.setColor(new Color(255, 255, 255, 10));
 
             g.fillRoundRect(
                     0,

@@ -176,9 +176,7 @@ public class MyRequestsPanel extends JPanel {
         JLabel code = new JLabel(request.getRequestCode());
         code.setFont(AppTheme.semibold(14));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new JLabel(UiSupport.displayStatus(request.getStatus()));
-        status.setFont(AppTheme.semibold(10));
-        status.setForeground(UiSupport.statusColor(request.getStatus()));
+        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
         status.setHorizontalAlignment(SwingConstants.RIGHT);
         titleRow.add(code, BorderLayout.WEST);
         titleRow.add(status, BorderLayout.EAST);

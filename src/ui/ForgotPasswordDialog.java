@@ -99,7 +99,7 @@ public class ForgotPasswordDialog extends JDialog {
 
         JLabel eyebrow = new JLabel("ACCOUNT SECURITY");
 
-        eyebrow.setFont(AppTheme.semibold(9));
+        eyebrow.setFont(AppTheme.semibold(10.5f));
         eyebrow.setForeground(PRIMARY);
         eyebrow.setAlignmentX(Component.LEFT_ALIGNMENT);
 

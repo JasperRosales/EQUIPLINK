@@ -115,7 +115,7 @@ public class PasswordChangeDialog extends JDialog {
         );
 
         eyebrow.setFont(
-                AppTheme.semibold(9)
+                AppTheme.semibold(10.5f)
         );
 
         eyebrow.setForeground(PRIMARY);

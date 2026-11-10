@@ -30,9 +30,9 @@ public class PrimaryButton extends JButton {
     public PrimaryButton(String text, Style style) {
         super(text);
         this.style = style;
-        setFont(AppTheme.semibold(13));
+        setFont(AppTheme.semibold(12.5f));
         setForeground(style == Style.SECONDARY ? AppTheme.foreground() : Color.WHITE);
-        setBorder(new EmptyBorder(10, 17, 10, 17));
+        setBorder(new EmptyBorder(9, 16, 9, 16));
         setFocusPainted(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
@@ -72,20 +72,21 @@ public class PrimaryButton extends JButton {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         int inset = 1;
-        int arc = 13;
+        int arc = 10;
         Color base = baseColor();
         if (pressed) {
             base = base.darker();
-        } else if (hovered) {
-            base = brighten(base);
+        } else if (hovered && style != Style.SECONDARY) {
+            base = darken(base);
         }
 
-        if (style == Style.PRIMARY && !pressed) {
-            g.setPaint(new GradientPaint(0, 0, brighten(base), getWidth(), getHeight(), base));
-        } else {
-            g.setColor(base);
-        }
+        g.setColor(isEnabled() ? base : AppTheme.border());
         g.fillRoundRect(inset, inset, getWidth() - inset * 2, getHeight() - inset * 2, arc, arc);
+        if (style == Style.SECONDARY) {
+            g.setColor(AppTheme.border());
+            g.drawRoundRect(inset, inset, getWidth() - inset * 2 - 1,
+                    getHeight() - inset * 2 - 1, arc, arc);
+        }
         if (hovered && style == Style.SECONDARY) {
             g.setColor(new Color(AppTheme.primary().getRed(), AppTheme.primary().getGreen(),
                     AppTheme.primary().getBlue(), 24));
@@ -98,13 +99,18 @@ public class PrimaryButton extends JButton {
     private Color baseColor() {
         switch (style) {
             case SECONDARY:
-                return AppTheme.elevatedSurface();
+                return AppTheme.surface();
             case DANGER:
                 return AppTheme.danger();
             case PRIMARY:
             default:
                 return AppTheme.primary();
         }
+    }
+
+    private Color darken(Color color) {
+        return new Color(Math.max(0, color.getRed() - 18), Math.max(0, color.getGreen() - 18),
+                Math.max(0, color.getBlue() - 18), color.getAlpha());
     }
 
     private Color brighten(Color color) {
