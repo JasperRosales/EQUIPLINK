@@ -69,4 +69,39 @@ public class NotificationService {
             statement.executeUpdate();
         }
     }
+
+    public boolean hasPendingReminderToday(long userId) throws SQLException {
+        String sql = """
+                SELECT 1
+                FROM notifications
+                WHERE user_id = ?
+                  AND title = 'Pending request reminder'
+                  AND created_at::date = CURRENT_DATE
+                LIMIT 1
+                """;
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, userId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next();
+            }
+        }
+    }
+
+    public void createPendingReminder(long userId, int pendingCount)
+            throws SQLException {
+        String message = pendingCount == 1
+                ? "You have 1 pending request waiting for your action."
+                : "You have " + pendingCount
+                        + " pending requests waiting for your action.";
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO notifications (user_id, title, message)
+                        VALUES (?, 'Pending request reminder', ?)
+                        """)) {
+            statement.setLong(1, userId);
+            statement.setString(2, message);
+            statement.executeUpdate();
+        }
+    }
 }

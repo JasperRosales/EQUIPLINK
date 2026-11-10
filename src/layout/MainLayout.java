@@ -62,6 +62,7 @@ public class MainLayout extends JPanel {
         private boolean notificationsEnabled = true;
         private Runnable logoutAction;
         private String currentPage = "Dashboard";
+        private javax.swing.Timer reminderTimer;
 
         public MainLayout(User user, AuthController authController) {
                 this(user, authController,
@@ -158,6 +159,7 @@ public class MainLayout extends JPanel {
                 add(sidebar, BorderLayout.WEST);
                 add(mainPanel, BorderLayout.CENTER);
                 showPage("Dashboard");
+                schedulePendingReminder();
         }
 
         private JPanel createSidebarTop(String systemName, String[] navigationItems) {
@@ -589,6 +591,8 @@ public class MainLayout extends JPanel {
                 Color background = AppTheme.background();
                 Color surface = AppTheme.surface();
                 setBackground(background);
+                sidebar.setBackground(AppTheme.sidebar());
+                sidebar.setBorder(null);
                 mainPanel.setBackground(background);
                 pageContainer.setBackground(background);
                 header.setBackground(surface);
@@ -598,9 +602,16 @@ public class MainLayout extends JPanel {
                 navigationPanel.setBackground(AppTheme.sidebar());
                 pageTitle.setForeground(AppTheme.foreground());
                 pageDescription.setForeground(AppTheme.muted());
-                notificationButton.setForeground(AppTheme.foreground());
-                headerUserName.setForeground(AppTheme.foreground());
-                headerUserRole.setForeground(AppTheme.muted());
+                if (notificationButton != null) {
+                        notificationButton.setForeground(AppTheme.foreground());
+                }
+                if (headerUserName != null) {
+                        headerUserName.setForeground(AppTheme.foreground());
+                }
+                if (headerUserRole != null) {
+                        headerUserRole.setForeground(AppTheme.muted());
+                }
+                javax.swing.SwingUtilities.updateComponentTreeUI(this);
                 revalidate();
                 repaint();
         }
@@ -635,5 +646,78 @@ public class MainLayout extends JPanel {
 
         public JPanel getPageContainer() {
                 return pageContainer;
+        }
+
+        private boolean isApprover() {
+                String role = user == null ? "" : user.getRole();
+                String normalized = role == null ? "" : role.trim().toUpperCase().replace(' ', '_');
+                return "ICT_STAFF".equals(normalized)
+                                || "FACILITY_STAFF".equals(normalized)
+                                || "ADMIN".equals(normalized)
+                                || "DIRECTOR".equals(normalized);
+        }
+
+        private void schedulePendingReminder() {
+                if (!isApprover() || requestController == null || notificationController == null) {
+                        return;
+                }
+                checkPendingReminder(true);
+                scheduleFourPmReminder();
+        }
+
+        private void scheduleFourPmReminder() {
+                java.time.LocalDateTime now = java.time.LocalDateTime.now();
+                java.time.LocalDateTime next = now.with(java.time.LocalTime.of(16, 0));
+                if (!now.isBefore(next)) {
+                        next = next.plusDays(1);
+                }
+                long delay = Math.max(1000L, java.time.Duration.between(now, next).toMillis());
+                int timerDelay = (int) Math.min(delay, Integer.MAX_VALUE);
+                reminderTimer = new javax.swing.Timer(timerDelay, event -> {
+                        checkPendingReminder(false);
+                        scheduleFourPmReminder();
+                });
+                reminderTimer.setRepeats(false);
+                reminderTimer.start();
+        }
+
+        private void checkPendingReminder(boolean onLogin) {
+                if (!isApprover()) {
+                        return;
+                }
+                new javax.swing.SwingWorker<Integer, Void>() {
+                        @Override
+                        protected Integer doInBackground() throws Exception {
+                                int pending = requestController.countQueueForRole(user.getRole());
+                                if (pending > 0 && !notificationController.hasPendingReminderToday(
+                                                user.getUserId())) {
+                                        notificationController.createPendingReminder(
+                                                        user.getUserId(), pending);
+                                }
+                                return pending;
+                        }
+
+                        @Override
+                        protected void done() {
+                                try {
+                                        int pending = get();
+                                        if (pending > 0 && notificationsEnabled) {
+                                                String msg = pending == 1
+                                                                ? "You have 1 pending request waiting for your action."
+                                                                : "You have " + pending
+                                                                                + " pending requests waiting for your action.";
+                                                if (!onLogin) {
+                                                        msg += "\n(4:00 PM reminder)";
+                                                }
+                                                javax.swing.JOptionPane.showMessageDialog(
+                                                                MainLayout.this,
+                                                                msg,
+                                                                "Pending request reminder",
+                                                                javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                                        }
+                                } catch (Exception ignored) {
+                                }
+                        }
+                }.execute();
         }
 }

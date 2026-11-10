@@ -16,6 +16,10 @@ public class BorrowRequestController {
         this.requestService = requestService;
     }
 
+    public int countQueueForRole(String role) throws Exception {
+        return requestService.countQueueForRole(role);
+    }
+
     public List<BorrowRequest> findActiveRequests(long borrowerId) throws Exception {
         return requestService.findActiveRequests(borrowerId);
     }
@@ -51,10 +55,6 @@ public class BorrowRequestController {
 
     public int countBorrowedForBorrower(long borrowerId) throws Exception {
         return requestService.countBorrowedForBorrower(borrowerId);
-    }
-
-    public int countQueueForRole(String role) throws Exception {
-        return requestService.countQueueForRole(role);
     }
 
     public int countByStatus(String status) throws Exception {
