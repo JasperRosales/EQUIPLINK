@@ -104,9 +104,14 @@ public class LoginFrame extends JFrame {
 
         ImageIcon logoImage = BrandLogo.full(104);
         if (logoImage != null) {
-            JLabel logo = new JLabel(logoImage);
-            logo.setAlignmentX(Component.LEFT_ALIGNMENT);
-            form.add(logo);
+            // Full-width row so the logo is centred while other rows stay left-aligned.
+            JPanel logoRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+            logoRow.setOpaque(false);
+            logoRow.add(new JLabel(logoImage));
+            logoRow.setMaximumSize(new Dimension(
+                    Integer.MAX_VALUE, logoImage.getIconHeight()));
+            logoRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+            form.add(logoRow);
             form.add(Box.createVerticalStrut(16));
         }
 
