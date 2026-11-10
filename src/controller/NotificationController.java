@@ -24,4 +24,13 @@ public class NotificationController {
     public void markAllRead(long userId) throws Exception {
         notificationService.markAllRead(userId);
     }
+
+    public boolean hasPendingReminderToday(long userId) throws Exception {
+        return notificationService.hasPendingReminderToday(userId);
+    }
+
+    public void createPendingReminder(long userId, int pendingCount)
+            throws Exception {
+        notificationService.createPendingReminder(userId, pendingCount);
+    }
 }
