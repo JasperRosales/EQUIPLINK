@@ -125,7 +125,29 @@ public class LoginFrame extends JFrame {
 
         // Input fields
         addField(form, "Username or email", username);
-        addField(form, "Password", password);
+        JPanel passwordRow = new JPanel(new BorderLayout(6, 0));
+        passwordRow.setOpaque(false);
+        passwordRow.add(password, BorderLayout.CENTER);
+        char defaultEcho = password.getEchoChar();
+        JButton togglePassword = new JButton("👁");
+        togglePassword.setToolTipText("Show password");
+        togglePassword.setFont(AppTheme.regular(14));
+        togglePassword.setMargin(new Insets(0, 8, 0, 8));
+        togglePassword.setFocusable(false);
+        togglePassword.setBorderPainted(false);
+        togglePassword.setContentAreaFilled(false);
+        togglePassword.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        togglePassword.addActionListener(event -> {
+            if (password.getEchoChar() == 0) {
+                password.setEchoChar(defaultEcho);
+                togglePassword.setToolTipText("Show password");
+            } else {
+                password.setEchoChar((char) 0);
+                togglePassword.setToolTipText("Hide password");
+            }
+        });
+        passwordRow.add(togglePassword, BorderLayout.EAST);
+        addField(form, "Password", passwordRow);
 
         // Password assistance
         JPanel passwordHelp = new JPanel(new BorderLayout());
