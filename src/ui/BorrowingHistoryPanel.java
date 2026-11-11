@@ -1,21 +1,27 @@
 package src.ui;
 
 import src.model.BorrowRequest;
+import src.model.EquipmentRequestItem;
 import src.controller.BorrowRequestController;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class BorrowingHistoryPanel extends JPanel {
 
@@ -23,6 +29,9 @@ public class BorrowingHistoryPanel extends JPanel {
     private final BorrowRequestController requestController;
     private final JPanel historyList = new JPanel();
 
+    private final JTextField search = new JTextField(18);
+    private final JComboBox<String> statusFilter = new JComboBox<>(
+            new String[] { "All history", "Completed", "Rejected", "Cancelled" });
     private final src.ui.components.DateFilter dateFilter =
             new src.ui.components.DateFilter();
     private List<BorrowRequest> loaded = List.of();
@@ -40,7 +49,7 @@ public class BorrowingHistoryPanel extends JPanel {
         JLabel hint = new JLabel("Completed, cancelled, and declined equipment requests.");
         hint.setFont(AppTheme.regular(11));
         hint.setForeground(AppTheme.muted());
-        JPanel titleBar = new JPanel(new BorderLayout(12, 0));
+        JPanel titleBar = new JPanel(new BorderLayout(8, 8));
         titleBar.setOpaque(false);
         JPanel titles = new JPanel();
         titles.setOpaque(false);
@@ -48,12 +57,26 @@ public class BorrowingHistoryPanel extends JPanel {
         titles.add(heading);
         titles.add(Box.createVerticalStrut(4));
         titles.add(hint);
-        titleBar.add(titles, BorderLayout.CENTER);
+        titleBar.add(titles, BorderLayout.NORTH);
+
+        JPanel filters = new JPanel(new BorderLayout(8, 0));
+        filters.setOpaque(false);
+        UiSupport.styleInput(search);
+        search.putClientProperty("JTextField.placeholderText",
+                "Search by code, venue, purpose, or equipment");
+        search.putClientProperty("JTextField.showClearButton", true);
+        search.getDocument().addDocumentListener(UiSupport.documentListener(() -> showHistory(loaded)));
+        filters.add(search, BorderLayout.CENTER);
+        JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        tools.setOpaque(false);
+        statusFilter.setFont(AppTheme.regular(12));
+        statusFilter.setPreferredSize(new Dimension(150, 40));
+        statusFilter.addActionListener(event -> showHistory(loaded));
         dateFilter.addChangeListener(() -> showHistory(loaded));
-        JPanel filterWrap = new JPanel(new java.awt.GridBagLayout());
-        filterWrap.setOpaque(false);
-        filterWrap.add(dateFilter);
-        titleBar.add(filterWrap, BorderLayout.EAST);
+        tools.add(statusFilter);
+        tools.add(dateFilter);
+        filters.add(tools, BorderLayout.EAST);
+        titleBar.add(filters, BorderLayout.CENTER);
         add(titleBar);
         add(Box.createVerticalStrut(14));
 
@@ -90,17 +113,26 @@ public class BorrowingHistoryPanel extends JPanel {
 
     private void showHistory(List<BorrowRequest> all) {
         loaded = all;
-        List<BorrowRequest> requests = new java.util.ArrayList<>();
+        String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
+        String status = String.valueOf(statusFilter.getSelectedItem());
+        List<BorrowRequest> requests = new ArrayList<>();
         for (BorrowRequest request : all) {
-            if (dateFilter.matches(request.getEventDate())) {
-                requests.add(request);
+            if (!dateFilter.matches(request.getEventDate())) {
+                continue;
             }
+            if ("Completed".equals(status) && !"COMPLETED".equals(request.getStatus())) continue;
+            if ("Rejected".equals(status) && !"REJECTED".equals(request.getStatus())) continue;
+            if ("Cancelled".equals(status) && !"CANCELLED".equals(request.getStatus())) continue;
+            if (!query.isEmpty() && !matchesQuery(request, query)) {
+                continue;
+            }
+            requests.add(request);
         }
         historyList.removeAll();
         if (requests.isEmpty()) {
             historyList.add(message(all.isEmpty()
                     ? "Past borrowing records will appear here after a request is completed or closed."
-                    : "No records match the selected dates.",
+                    : "No records match the current search or filters.",
                     false));
         } else {
             for (BorrowRequest request : requests) {
@@ -110,6 +142,21 @@ public class BorrowingHistoryPanel extends JPanel {
         }
         historyList.revalidate();
         historyList.repaint();
+    }
+
+    private boolean matchesQuery(BorrowRequest request, String query) {
+        StringBuilder text = new StringBuilder()
+                .append(request.getRequestCode()).append(' ')
+                .append(request.getVenue()).append(' ')
+                .append(request.getPurpose()).append(' ')
+                .append(request.getStatus()).append(' ')
+                .append(request.getRemarks() == null ? "" : request.getRemarks());
+        for (EquipmentRequestItem item : request.getEquipmentItems()) {
+            text.append(' ').append(item.getEquipmentName())
+                    .append(' ').append(item.getEquipmentCode())
+                    .append(' ').append(item.getCategory());
+        }
+        return text.toString().toLowerCase(Locale.ROOT).contains(query);
     }
 
     private JPanel historyCard(BorrowRequest request) {
@@ -127,8 +174,11 @@ public class BorrowingHistoryPanel extends JPanel {
         status.setHorizontalAlignment(SwingConstants.RIGHT);
         titleRow.add(code, BorderLayout.WEST);
         titleRow.add(status, BorderLayout.EAST);
+        DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
         JLabel subtitle = new JLabel(request.getVenue() + "  ·  "
                 + request.getEventDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+                + "  ·  " + request.getStartTime().format(timeFmt)
+                + "–" + request.getEndTime().format(timeFmt)
                 + "  ·  " + request.getEquipmentItems().size() + " item(s)");
         subtitle.setFont(AppTheme.regular(11));
         subtitle.setForeground(AppTheme.muted());
