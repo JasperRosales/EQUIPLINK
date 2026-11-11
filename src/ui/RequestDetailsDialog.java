@@ -49,9 +49,11 @@ public class RequestDetailsDialog extends JDialog {
         activity.setLayout(new BoxLayout(activity, BoxLayout.Y_AXIS));
         addTitle(activity, "Activity details");
         addInfo(activity, "Venue", request.getVenue());
+        DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.ENGLISH);
         addInfo(activity, "Event date",
                 request.getEventDate().format(DateTimeFormatter.ofPattern("MMMM d, yyyy")));
-        addInfo(activity, "Time", request.getStartTime() + " – " + request.getEndTime());
+        addInfo(activity, "Time",
+                request.getStartTime().format(timeFmt) + " – " + request.getEndTime().format(timeFmt));
         addInfo(activity, "Participants", request.getParticipants());
         addInfo(activity, "Person in charge", request.getPersonInCharge());
         addInfo(activity, "Position", request.getPosition());
@@ -125,10 +127,12 @@ public class RequestDetailsDialog extends JDialog {
         key.setFont(AppTheme.regular(10));
         key.setForeground(AppTheme.muted());
         key.setPreferredSize(new Dimension(132, 22));
-        JLabel detail = new JLabel(value == null ? "—" : value);
+        String text = value == null ? "—" : value;
+        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        JLabel detail = new JLabel("<html><div style='width:430px'>" + safe + "</div></html>");
         detail.setFont(AppTheme.regular(11));
         detail.setForeground(AppTheme.foreground());
-        row.add(key, BorderLayout.WEST);
+        row.add(key, BorderLayout.NORTH);
         row.add(detail, BorderLayout.CENTER);
         panel.add(row);
     }

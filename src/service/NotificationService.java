@@ -8,7 +8,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
+import java.util.TimeZone;
 
 public class NotificationService {
 
@@ -34,11 +36,13 @@ public class NotificationService {
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, userId);
+            Calendar manila = Calendar.getInstance(TimeZone.getTimeZone("Asia/Manila"));
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) {
                     long requestId = result.getLong("request_id");
                     Long nullableRequestId = result.wasNull() ? null : requestId;
                     java.sql.Date eventDate = result.getDate("event_date");
+                    java.sql.Timestamp created = result.getTimestamp("created_at", manila);
                     notifications.add(new Notification(
                             result.getLong("notification_id"),
                             result.getLong("user_id"),
@@ -46,7 +50,7 @@ public class NotificationService {
                             result.getString("title"),
                             result.getString("message"),
                             result.getBoolean("is_read"),
-                            result.getTimestamp("created_at").toLocalDateTime(),
+                            created == null ? null : created.toLocalDateTime(),
                             result.getString("equipment_names"),
                             result.getString("equipment_categories"),
                             eventDate == null ? null : eventDate.toLocalDate()));

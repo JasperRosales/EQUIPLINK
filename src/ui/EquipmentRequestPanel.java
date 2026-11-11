@@ -43,6 +43,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class EquipmentRequestPanel extends JPanel {
 
@@ -109,21 +110,42 @@ public class EquipmentRequestPanel extends JPanel {
     private void initializeValues(User user) {
         LocalDate eventDay = LocalDate.now().plusDays(1);
         eventDate.setText(eventDay.format(DateTimeFormatter.ISO_LOCAL_DATE));
-        startTime.setText("09:00");
-        endTime.setText("10:00");
+        startTime.setText("09:00 AM");
+        endTime.setText("10:00 AM");
         participants.setText("1");
         personInCharge.setText(user.getFullName());
         position.setText("Borrower");
         purpose.setLineWrap(true);
         purpose.setWrapStyleWord(true);
+        venue.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private boolean adjusting;
+            private void upper() {
+                if (adjusting) return;
+                String t = venue.getText();
+                String u = t == null ? "" : t.toUpperCase(Locale.ROOT);
+                if (!u.equals(t)) {
+                    adjusting = true;
+                    try {
+                        int pos = venue.getCaretPosition();
+                        venue.setText(u);
+                        venue.setCaretPosition(Math.min(pos, u.length()));
+                    } finally {
+                        adjusting = false;
+                    }
+                }
+            }
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { upper(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { upper(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { upper(); }
+        });
 
         if (existingRequest != null) {
-            venue.setText(existingRequest.getVenue());
+            venue.setText(existingRequest.getVenue() == null ? ""
+                    : existingRequest.getVenue().toUpperCase());
             eventDate.setText(existingRequest.getEventDate().toString());
-            startTime.setText(existingRequest.getStartTime().format(
-                    DateTimeFormatter.ofPattern("HH:mm")));
-            endTime.setText(existingRequest.getEndTime().format(
-                    DateTimeFormatter.ofPattern("HH:mm")));
+            DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
+            startTime.setText(existingRequest.getStartTime().format(timeFmt));
+            endTime.setText(existingRequest.getEndTime().format(timeFmt));
             participants.setText(existingRequest.getParticipants());
             personInCharge.setText(existingRequest.getPersonInCharge());
             position.setText(existingRequest.getPosition());
@@ -161,8 +183,8 @@ public class EquipmentRequestPanel extends JPanel {
         styleArea(purpose);
         addFormField(eventCard, "Venue", venue, 1, 0);
         addFormField(eventCard, "Event date (YYYY-MM-DD)", eventDate, 1, 1);
-        addFormField(eventCard, "Start time (HH:MM)", startTime, 2, 0);
-        addFormField(eventCard, "End time (HH:MM)", endTime, 2, 1);
+        addFormField(eventCard, "Start time (hh:mm AM/PM)", startTime, 2, 0);
+        addFormField(eventCard, "End time (hh:mm AM/PM)", endTime, 2, 1);
         addFormField(eventCard, "Participants", participants, 3, 0);
         addFormField(eventCard, "Person in charge", personInCharge, 3, 1);
         addFormField(eventCard, "Position", position, 4, 0);
@@ -276,15 +298,31 @@ public class EquipmentRequestPanel extends JPanel {
         area.setWrapStyleWord(true);
     }
 
+    private LocalTime parseTime(String value) {
+        String text = value == null ? "" : value.trim().toUpperCase(Locale.ENGLISH).replace("  ", " ");
+        DateTimeParseException last = null;
+        for (DateTimeFormatter fmt : new DateTimeFormatter[] {
+                DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH),
+                DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH),
+                DateTimeFormatter.ofPattern("HH:mm") }) {
+            try {
+                return LocalTime.parse(text, fmt);
+            } catch (DateTimeParseException e) {
+                last = e;
+            }
+        }
+        throw last;
+    }
+
     private void loadEquipment() {
         try {
             LocalDate date = LocalDate.parse(eventDate.getText().trim());
-            LocalTime start = LocalTime.parse(startTime.getText().trim());
-            LocalTime end = LocalTime.parse(endTime.getText().trim());
+            LocalTime start = parseTime(startTime.getText());
+            LocalTime end = parseTime(endTime.getText());
             loadEquipment(date, start, end);
         } catch (DateTimeParseException exception) {
             inventoryNote.setForeground(AppTheme.warning());
-            inventoryNote.setText("Enter a valid date and time to check availability.");
+            inventoryNote.setText("Enter a valid date and time (hh:mm AM/PM) to check availability.");
             equipmentPicker.setEnabled(false);
         }
     }
@@ -440,17 +478,17 @@ public class EquipmentRequestPanel extends JPanel {
         BorrowRequestForm form;
         try {
             form = new BorrowRequestForm(
-                    venue.getText(),
+                    venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT),
                     LocalDate.parse(eventDate.getText().trim()),
-                    LocalTime.parse(startTime.getText().trim()),
-                    LocalTime.parse(endTime.getText().trim()),
+                    parseTime(startTime.getText()),
+                    parseTime(endTime.getText()),
                     purpose.getText(),
                     participants.getText(),
                     personInCharge.getText(),
                     position.getText(),
                     selectedItems);
         } catch (DateTimeParseException exception) {
-            showMessage("Use YYYY-MM-DD for the date and HH:MM for times.",
+            showMessage("Use YYYY-MM-DD for date and hh:mm AM/PM for times (e.g. 09:00 AM).",
                     "Check date and time");
             return;
         }
