@@ -135,6 +135,31 @@ public final class DatabaseInitializer {
                     )
                     """,
 
+            // 3b. REQUEST OCCURRENCES (monthly/multi-schedule)
+            """
+                    CREATE TABLE IF NOT EXISTS request_occurrences (
+                        occurrence_id BIGSERIAL PRIMARY KEY,
+                        request_id BIGINT NOT NULL
+                            REFERENCES borrow_requests(request_id)
+                            ON DELETE CASCADE,
+                        event_date DATE NOT NULL,
+                        start_time TIME NOT NULL,
+                        end_time TIME NOT NULL,
+                        venue VARCHAR(150) NOT NULL,
+                        release_notified BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CHECK (end_time > start_time)
+                    )
+                    """,
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS substitute_equipment_id BIGINT REFERENCES equipment(equipment_id)",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS unavailable_remarks TEXT",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_groups DROP CONSTRAINT IF EXISTS request_groups_request_id_custodian_role_key",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_request_groups_occ_role ON request_groups(occurrence_id, custodian_role) WHERE occurrence_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_occurrences_request ON request_occurrences(request_id, event_date, start_time)",
+
             // 4. REQUEST GROUPS
             """
                     CREATE TABLE IF NOT EXISTS request_groups (

@@ -63,6 +63,22 @@ public class RequestDetailsDialog extends JDialog {
         content.add(activity);
         content.add(Box.createVerticalStrut(12));
 
+        if (request.getOccurrences() != null && request.getOccurrences().size() > 1) {
+            SurfacePanel sched = new SurfacePanel();
+            sched.setLayout(new BoxLayout(sched, BoxLayout.Y_AXIS));
+            addTitle(sched, "Schedules (" + request.getOccurrences().size() + ")");
+            int idx = 1;
+            for (src.model.RequestOccurrence o : request.getOccurrences()) {
+                addInfo(sched, "Schedule " + (idx++),
+                        o.getEventDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+                                + "  " + o.getStartTime().format(timeFmt)
+                                + "–" + o.getEndTime().format(timeFmt)
+                                + "  ·  " + (o.getVenue() == null ? "—" : o.getVenue()));
+            }
+            content.add(sched);
+            content.add(Box.createVerticalStrut(12));
+        }
+
         SurfacePanel purpose = new SurfacePanel();
         purpose.setLayout(new BoxLayout(purpose, BoxLayout.Y_AXIS));
         addTitle(purpose, "Purpose");

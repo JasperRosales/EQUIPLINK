@@ -5,6 +5,7 @@ import src.model.BorrowRequest;
 import src.model.BorrowRequestForm;
 import src.model.EquipmentRequestItem;
 import src.model.ItemInspection;
+import src.model.RequestOccurrence;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -61,8 +62,11 @@ public class BorrowRequestService {
                 Map<Long, EquipmentRecord> equipment =
                         lockAndValidateEquipment(connection, form, null);
                 long requestId = insertRequest(connection, borrowerId, form);
-                Map<String, Long> groupIds = createGroups(connection, requestId, equipment);
-                insertItems(connection, requestId, form, equipment, groupIds);
+                List<Long> occurrenceIds = insertOccurrences(connection, requestId, form);
+                for (Long occId : occurrenceIds) {
+                    Map<String, Long> groupIds = createGroups(connection, requestId, occId, equipment);
+                    insertItems(connection, requestId, occId, form, equipment, groupIds);
+                }
                 recordHistory(connection, requestId, null, borrowerId,
                         "SUBMITTED", null, "PENDING_STAFF", null);
                 boolean priority = isFacultyBorrower(connection, borrowerId);
@@ -111,14 +115,22 @@ public class BorrowRequestService {
                     }
                 }
 
-                try (PreparedStatement statement = connection.prepareStatement(
-                        "DELETE FROM request_items WHERE request_id = ?")) {
-                    statement.setLong(1, requestId);
-                    statement.executeUpdate();
+                try (PreparedStatement s = connection.prepareStatement(
+                        "DELETE FROM request_occurrences WHERE request_id = ?")) {
+                    s.setLong(1, requestId);
+                    s.executeUpdate();
+                }
+                try (PreparedStatement s = connection.prepareStatement(
+                        "DELETE FROM request_groups WHERE request_id = ?")) {
+                    s.setLong(1, requestId);
+                    s.executeUpdate();
                 }
 
-                Map<String, Long> groupIds = prepareGroupsForEdit(connection, requestId, equipment);
-                insertItems(connection, requestId, form, equipment, groupIds);
+                List<Long> occurrenceIds = insertOccurrences(connection, requestId, form);
+                for (Long occId : occurrenceIds) {
+                    Map<String, Long> groupIds = createGroups(connection, requestId, occId, equipment);
+                    insertItems(connection, requestId, occId, form, equipment, groupIds);
+                }
                 recordHistory(connection, requestId, null, borrowerId,
                         "BORROWER_EDITED", previousStatus, "PENDING_STAFF",
                         "Borrower updated request details.");
@@ -1127,38 +1139,73 @@ public class BorrowRequestService {
         }
 
         List<BorrowRequest> requests = new ArrayList<>();
+        if (!builders.isEmpty()) {
+            loadOccurrences(null, builders);
+        }
         for (BorrowRequestBuilder builder : builders.values()) {
             requests.add(builder.build());
         }
         return requests;
     }
 
+    private void loadOccurrences(Connection ignored, Map<Long, BorrowRequestBuilder> builders)
+            throws SQLException {
+        if (builders.isEmpty()) return;
+        StringBuilder in = new StringBuilder();
+        for (int i = 0; i < builders.size(); i++) { if (i > 0) in.append(','); in.append('?'); }
+        String q = "SELECT occurrence_id, request_id, event_date, start_time, end_time, venue "
+                + "FROM request_occurrences WHERE request_id IN (" + in
+                + ") ORDER BY event_date, start_time, occurrence_id";
+        try (Connection c = Database.getConnection();
+             PreparedStatement ps = c.prepareStatement(q)) {
+            int i = 1;
+            for (Long id : builders.keySet()) ps.setLong(i++, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    BorrowRequestBuilder b = builders.get(rs.getLong("request_id"));
+                    if (b != null) b.occurrences.add(new RequestOccurrence(
+                            rs.getLong("occurrence_id"), rs.getLong("request_id"),
+                            rs.getDate("event_date").toLocalDate(),
+                            rs.getTime("start_time").toLocalTime(),
+                            rs.getTime("end_time").toLocalTime(),
+                            rs.getString("venue")));
+                }
+            }
+        }
+    }
+
     private void validate(BorrowRequestForm form) {
         if (form == null) {
             throw new IllegalArgumentException("Request details are required.");
         }
-        if (form.getVenue().isBlank()
-                || form.getEventDate() == null
-                || form.getStartTime() == null
-                || form.getEndTime() == null
-                || form.getPurpose().isBlank()
+        List<RequestOccurrence> occs = effectiveOccurrences(form);
+        if (occs.isEmpty()) {
+            throw new IllegalArgumentException("Add at least one schedule.");
+        }
+        RequestOccurrence first = occs.get(0);
+        if (form.getPurpose().isBlank()
                 || form.getParticipants().isBlank()
                 || form.getPersonInCharge().isBlank()
                 || form.getPosition().isBlank()) {
             throw new IllegalArgumentException("Complete all required request details.");
         }
-        if (form.getVenue().length() > 150
-                || form.getParticipants().length() > 255
+        if (form.getParticipants().length() > 255
                 || form.getPersonInCharge().length() > 150
                 || form.getPosition().length() > 100) {
             throw new IllegalArgumentException(
-                    "Some request details are too long. Shorten the venue, participants, person in charge, or position.");
+                    "Some request details are too long. Shorten the participants, person in charge, or position.");
         }
-        if (form.getEventDate().isBefore(LocalDate.now())) {
-            throw new IllegalArgumentException("The event date cannot be in the past.");
-        }
-        if (!form.getEndTime().isAfter(form.getStartTime())) {
-            throw new IllegalArgumentException("The end time must be after the start time.");
+        for (RequestOccurrence o : occs) {
+            if (o.getVenue() == null || o.getVenue().isBlank() || o.getVenue().length() > 150
+                    || o.getEventDate() == null || o.getStartTime() == null || o.getEndTime() == null) {
+                throw new IllegalArgumentException("Complete venue, date, start time, and end time for each schedule.");
+            }
+            if (o.getEventDate().isBefore(LocalDate.now())) {
+                throw new IllegalArgumentException("Schedule dates cannot be in the past.");
+            }
+            if (!o.getEndTime().isAfter(o.getStartTime())) {
+                throw new IllegalArgumentException("Each schedule's end time must be after its start time.");
+            }
         }
         if (form.getEquipmentItems().isEmpty()) {
             throw new IllegalArgumentException("Add at least one equipment item.");
@@ -1174,6 +1221,17 @@ public class BorrowRequestService {
                         "Each equipment type can only be added once.");
             }
         }
+    }
+
+    private List<RequestOccurrence> effectiveOccurrences(BorrowRequestForm form) {
+        if (form.getOccurrences() != null && !form.getOccurrences().isEmpty()) {
+            return form.getOccurrences();
+        }
+        if (form.getEventDate() != null && form.getStartTime() != null && form.getEndTime() != null) {
+            return List.of(new RequestOccurrence(form.getEventDate(), form.getStartTime(),
+                    form.getEndTime(), form.getVenue()));
+        }
+        return List.of();
     }
 
     private Map<Long, EquipmentRecord> lockAndValidateEquipment(
@@ -1209,16 +1267,18 @@ public class BorrowRequestService {
                     custodianRole = result.getString("custodian_role");
                 }
             }
-            int available = EquipmentService.findAvailableQuantity(
-                    connection, id, excludedRequestId,
-                    form.getEventDate(), form.getStartTime(), form.getEndTime());
-            EquipmentRecord record = new EquipmentRecord(
-                    name, status, custodianRole, available);
-            if (!"AVAILABLE".equals(record.status)) {
-                throw new IllegalArgumentException(
-                        record.name + " is not currently available.");
+            if (!"AVAILABLE".equals(status)) {
+                throw new IllegalArgumentException(name + " is not currently available.");
             }
-            equipment.put(id, record);
+            int minAvailable = Integer.MAX_VALUE;
+            for (RequestOccurrence occ : effectiveOccurrences(form)) {
+                int available = EquipmentService.findAvailableQuantity(
+                        connection, id, excludedRequestId,
+                        occ.getEventDate(), occ.getStartTime(), occ.getEndTime());
+                if (available < minAvailable) minAvailable = available;
+            }
+            if (minAvailable == Integer.MAX_VALUE) minAvailable = 0;
+            equipment.put(id, new EquipmentRecord(name, status, custodianRole, minAvailable));
         }
 
         for (EquipmentRequestItem item : form.getEquipmentItems()) {
@@ -1226,7 +1286,8 @@ public class BorrowRequestService {
             if (record == null || item.getRequestedQuantity() > record.availableQuantity) {
                 throw new IllegalArgumentException(
                         "Requested quantity exceeds available stock for "
-                                + (record == null ? "equipment" : record.name) + ".");
+                                + (record == null ? "equipment" : record.name)
+                                + " on one or more selected schedules.");
             }
         }
         return equipment;
@@ -1246,11 +1307,20 @@ public class BorrowRequestService {
                 """;
         String code = "EL-" + UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 10).toUpperCase();
+        List<RequestOccurrence> occs = effectiveOccurrences(form);
+        RequestOccurrence first = occs.get(0);
         try (PreparedStatement statement = connection.prepareStatement(
                 sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setString(1, code);
             statement.setLong(2, borrowerId);
-            bindForm(statement, form, 2);
+            statement.setString(3, first.getVenue());
+            statement.setDate(4, Date.valueOf(first.getEventDate()));
+            statement.setTime(5, Time.valueOf(first.getStartTime()));
+            statement.setTime(6, Time.valueOf(first.getEndTime()));
+            statement.setString(7, form.getPurpose());
+            statement.setString(8, form.getParticipants());
+            statement.setString(9, form.getPersonInCharge());
+            statement.setString(10, form.getPosition());
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
                 if (!keys.next()) {
@@ -1261,14 +1331,38 @@ public class BorrowRequestService {
         }
     }
 
+    private List<Long> insertOccurrences(Connection connection, long requestId, BorrowRequestForm form)
+            throws SQLException {
+        List<Long> ids = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO request_occurrences (request_id, event_date, start_time, end_time, venue)
+                VALUES (?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            for (RequestOccurrence o : effectiveOccurrences(form)) {
+                statement.setLong(1, requestId);
+                statement.setDate(2, Date.valueOf(o.getEventDate()));
+                statement.setTime(3, Time.valueOf(o.getStartTime()));
+                statement.setTime(4, Time.valueOf(o.getEndTime()));
+                statement.setString(5, o.getVenue());
+                statement.executeUpdate();
+                try (ResultSet keys = statement.getGeneratedKeys()) {
+                    if (keys.next()) ids.add(keys.getLong(1));
+                }
+            }
+        }
+        return ids;
+    }
+
     private void bindForm(
             PreparedStatement statement,
             BorrowRequestForm form,
             int offset) throws SQLException {
-        statement.setString(1 + offset, form.getVenue());
-        statement.setDate(2 + offset, Date.valueOf(form.getEventDate()));
-        statement.setTime(3 + offset, Time.valueOf(form.getStartTime()));
-        statement.setTime(4 + offset, Time.valueOf(form.getEndTime()));
+        List<RequestOccurrence> occs = effectiveOccurrences(form);
+        RequestOccurrence first = occs.get(0);
+        statement.setString(1 + offset, first.getVenue());
+        statement.setDate(2 + offset, Date.valueOf(first.getEventDate()));
+        statement.setTime(3 + offset, Time.valueOf(first.getStartTime()));
+        statement.setTime(4 + offset, Time.valueOf(first.getEndTime()));
         statement.setString(5 + offset, form.getPurpose());
         statement.setString(6 + offset, form.getParticipants());
         statement.setString(7 + offset, form.getPersonInCharge());
@@ -1278,12 +1372,13 @@ public class BorrowRequestService {
     private Map<String, Long> createGroups(
             Connection connection,
             long requestId,
+            Long occurrenceId,
             Map<Long, EquipmentRecord> equipment) throws SQLException {
         Map<String, Long> groups = new HashMap<>();
         for (EquipmentRecord record : equipment.values()) {
             if (!groups.containsKey(record.custodianRole)) {
                 groups.put(record.custodianRole,
-                        insertGroup(connection, requestId, record.custodianRole));
+                        insertGroup(connection, requestId, occurrenceId, record.custodianRole));
             }
         }
         return groups;
@@ -1342,14 +1437,16 @@ public class BorrowRequestService {
         return groups;
     }
 
-    private long insertGroup(Connection connection, long requestId, String role)
+    private long insertGroup(Connection connection, long requestId, Long occurrenceId, String role)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO request_groups (request_id, custodian_role, status)
-                VALUES (?, ?, 'PENDING')
+                INSERT INTO request_groups (request_id, occurrence_id, custodian_role, status)
+                VALUES (?, ?, ?, 'PENDING')
                 """, Statement.RETURN_GENERATED_KEYS)) {
             statement.setLong(1, requestId);
-            statement.setString(2, role);
+            if (occurrenceId == null) statement.setNull(2, Types.BIGINT);
+            else statement.setLong(2, occurrenceId);
+            statement.setString(3, role);
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
                 if (!keys.next()) {
@@ -1363,14 +1460,15 @@ public class BorrowRequestService {
     private void insertItems(
             Connection connection,
             long requestId,
+            Long occurrenceId,
             BorrowRequestForm form,
             Map<Long, EquipmentRecord> equipment,
             Map<String, Long> groupIds) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO request_items (
-                    request_id, group_id, requested_equipment_id, requested_quantity
+                    request_id, occurrence_id, group_id, requested_equipment_id, requested_quantity
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """)) {
             for (EquipmentRequestItem item : form.getEquipmentItems()) {
                 EquipmentRecord record = equipment.get(item.getEquipmentId());
@@ -1379,9 +1477,11 @@ public class BorrowRequestService {
                     throw new SQLException("Equipment custodian group was not created.");
                 }
                 statement.setLong(1, requestId);
-                statement.setLong(2, groupId);
-                statement.setLong(3, item.getEquipmentId());
-                statement.setInt(4, item.getRequestedQuantity());
+                if (occurrenceId == null) statement.setNull(2, Types.BIGINT);
+                else statement.setLong(2, occurrenceId);
+                statement.setLong(3, groupId);
+                statement.setLong(4, item.getEquipmentId());
+                statement.setInt(5, item.getRequestedQuantity());
                 statement.addBatch();
             }
             statement.executeBatch();
@@ -1496,6 +1596,7 @@ public class BorrowRequestService {
         private final String remarks;
         private final LocalDateTime submittedAt;
         private final List<EquipmentRequestItem> items = new ArrayList<>();
+        private final List<RequestOccurrence> occurrences = new ArrayList<>();
         private final String borrowerType;
 
         private BorrowRequestBuilder(ResultSet result) throws SQLException {
@@ -1521,7 +1622,7 @@ public class BorrowRequestService {
             BorrowRequest request = new BorrowRequest(
                     requestId, requestCode, borrowerId, borrowerName, venue,
                     eventDate, startTime, endTime, purpose, participants,
-                    personInCharge, position, status, remarks, submittedAt, items);
+                    personInCharge, position, status, remarks, submittedAt, items, occurrences);
             request.setBorrowerType(borrowerType);
             return request;
         }
