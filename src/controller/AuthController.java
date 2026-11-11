@@ -93,4 +93,11 @@ public class AuthController {
         }
         return authService.findBorrowersForIct(actor.getRole());
     }
+
+    public void deleteBorrowerAccount(User actor, long userId) throws Exception {
+        if (actor == null) {
+            throw new SecurityException("A signed-in ICT account is required.");
+        }
+        authService.deleteBorrowerAccount(actor.getRole(), actor.getUserId(), userId);
+    }
 }

@@ -497,7 +497,7 @@ public class AuthService {
                                 SELECT user_id, username, email, full_name, department,
                                        role, borrower_type, active
                                 FROM users
-                                WHERE role = 'BORROWER'
+                                WHERE role = 'BORROWER' AND active = TRUE
                                 ORDER BY borrower_type, department NULLS LAST, full_name
                                 """);
                         ResultSet result = statement.executeQuery()) {
@@ -514,6 +514,23 @@ public class AuthService {
                     }
                 }
                 return users;
+            }
+
+            public void deleteBorrowerAccount(String actorRole, long actorId, long userId) throws Exception {
+                requireIctStaff(actorRole);
+                if (userId <= 0) throw new IllegalArgumentException("Select a valid account.");
+                if (actorId == userId) throw new IllegalArgumentException("You cannot delete your own account.");
+                try (Connection connection = Database.getConnection();
+                        PreparedStatement statement = connection.prepareStatement("""
+                                UPDATE users
+                                SET active = FALSE
+                                WHERE user_id = ? AND role = 'BORROWER' AND active = TRUE
+                                """)) {
+                    statement.setLong(1, userId);
+                    if (statement.executeUpdate() != 1) {
+                        throw new IllegalArgumentException("Account was not found or already deleted.");
+                    }
+                }
             }
 
             private void requireIctStaff(String actorRole) {

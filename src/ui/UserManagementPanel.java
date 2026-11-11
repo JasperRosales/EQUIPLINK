@@ -194,9 +194,46 @@ public class UserManagementPanel extends JPanel {
         JLabel status = new JLabel(user.isActive() ? "ACTIVE" : "INACTIVE");
         status.setFont(AppTheme.semibold(10.5f));
         status.setForeground(user.isActive() ? AppTheme.success() : AppTheme.danger());
+        src.ui.components.PrimaryButton delete = new src.ui.components.PrimaryButton(
+                "Delete", src.ui.components.PrimaryButton.Style.DANGER);
+        delete.addActionListener(event -> deleteUser(user));
+        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(status);
+        actions.add(delete);
         card.add(detail, BorderLayout.CENTER);
-        card.add(status, BorderLayout.EAST);
+        card.add(actions, BorderLayout.EAST);
         return card;
+    }
+
+    private void deleteUser(User user) {
+        int answer = javax.swing.JOptionPane.showConfirmDialog(
+                this,
+                "Delete account for " + user.getFullName() + " (" + user.getUsername() + ")?\n"
+                        + "This action cannot be undone.",
+                "Delete account",
+                javax.swing.JOptionPane.YES_NO_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (answer != javax.swing.JOptionPane.YES_OPTION) return;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                authController.deleteBorrowerAccount(actor, user.getUserId());
+                return null;
+            }
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    loadUsers();
+                } catch (Exception exception) {
+                    javax.swing.JOptionPane.showMessageDialog(
+                            UserManagementPanel.this, messageOf(exception),
+                            "Unable to delete account",
+                            javax.swing.JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void createFacultyAccount() {

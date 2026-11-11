@@ -122,25 +122,9 @@ public class EquipmentRequestPanel extends JPanel {
         position.setText("Borrower");
         purpose.setLineWrap(true);
         purpose.setWrapStyleWord(true);
-        if (venue.getDocument() instanceof javax.swing.text.AbstractDocument) {
-            ((javax.swing.text.AbstractDocument) venue.getDocument()).setDocumentFilter(
-                    new javax.swing.text.DocumentFilter() {
-                        @Override
-                        public void insertString(FilterBypass fb, int offset, String string,
-                                javax.swing.text.AttributeSet attr) throws javax.swing.text.BadLocationException {
-                            super.insertString(fb, offset, string == null ? null : string.toUpperCase(Locale.ROOT), attr);
-                        }
-                        @Override
-                        public void replace(FilterBypass fb, int offset, int length, String text,
-                                javax.swing.text.AttributeSet attrs) throws javax.swing.text.BadLocationException {
-                            super.replace(fb, offset, length, text == null ? null : text.toUpperCase(Locale.ROOT), attrs);
-                        }
-                    });
-        }
 
         if (existingRequest != null) {
-            venue.setText(existingRequest.getVenue() == null ? ""
-                    : existingRequest.getVenue().toUpperCase());
+            venue.setText(existingRequest.getVenue() == null ? "" : existingRequest.getVenue());
             eventDate.setText(existingRequest.getEventDate().toString());
             DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
             startTime.setText(existingRequest.getStartTime().format(timeFmt));
@@ -477,7 +461,7 @@ public class EquipmentRequestPanel extends JPanel {
 
     private void addScheduleFromFields() {
         try {
-            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            String v = venue.getText() == null ? "" : venue.getText().trim();
             LocalDate d = LocalDate.parse(eventDate.getText().trim());
             LocalTime st = parseTime(startTime.getText());
             LocalTime et = parseTime(endTime.getText());
@@ -566,7 +550,7 @@ public class EquipmentRequestPanel extends JPanel {
     private void saveRequest() {
         BorrowRequestForm form;
         try {
-            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            String v = venue.getText() == null ? "" : venue.getText().trim();
             LocalDate d = LocalDate.parse(eventDate.getText().trim());
             LocalTime st = parseTime(startTime.getText());
             LocalTime et = parseTime(endTime.getText());
@@ -645,7 +629,7 @@ public class EquipmentRequestPanel extends JPanel {
 
     private static class ScheduleRow {
         final LocalDate date; final LocalTime start; final LocalTime end; final String venue;
-        ScheduleRow(LocalDate d, LocalTime s, LocalTime e, String v){date=d;start=s;end=e;venue=v==null?"":v.toUpperCase(Locale.ROOT);}
+        ScheduleRow(LocalDate d, LocalTime s, LocalTime e, String v){date=d;start=s;end=e;venue=v==null?"":v.trim();}
         RequestOccurrence toOccurrence(){ return new RequestOccurrence(date,start,end,venue); }
     }
 
