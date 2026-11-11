@@ -15,6 +15,7 @@ import java.util.TimeZone;
 public class NotificationService {
 
     public List<Notification> findForUser(long userId) throws SQLException {
+        try { createUpcomingReleaseReminders(userId); } catch (Exception ignored) { }
         String sql = """
                 SELECT n.notification_id, n.user_id, n.request_id, n.title,
                        n.message, n.is_read, n.created_at,
@@ -119,6 +120,62 @@ public class NotificationService {
             statement.setLong(1, userId);
             statement.setString(2, message);
             statement.executeUpdate();
+        }
+    }
+
+    /** Notifies faculty borrowers before each upcoming scheduled equipment release (Asia/Manila). */
+    public void createUpcomingReleaseReminders(long userId) throws SQLException {
+        String sql = """
+                SELECT ro.occurrence_id, br.request_id, br.request_code, br.borrower_id,
+                       ro.event_date, ro.start_time, ro.venue
+                FROM request_occurrences ro
+                JOIN borrow_requests br ON br.request_id = ro.request_id
+                JOIN users u ON u.user_id = br.borrower_id
+                WHERE br.borrower_id = ?
+                  AND u.borrower_type = 'FACULTY'
+                  AND br.status IN ('APPROVED', 'RELEASED')
+                  AND COALESCE(ro.release_notified, FALSE) = FALSE
+                  AND (ro.event_date::timestamp + ro.start_time)
+                      <= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila') + INTERVAL '1 day')
+                  AND (ro.event_date::timestamp + ro.start_time)
+                      >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila') - INTERVAL '2 hours')
+                """;
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, userId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        long occId = rs.getLong("occurrence_id");
+                        long reqId = rs.getLong("request_id");
+                        String code = rs.getString("request_code");
+                        String msg = "Reminder: equipment release for " + code + " is scheduled on "
+                                + rs.getDate("event_date").toLocalDate() + " "
+                                + rs.getTime("start_time").toLocalTime()
+                                + " at " + rs.getString("venue") + ".";
+                        try (PreparedStatement ins = connection.prepareStatement("""
+                                INSERT INTO notifications (user_id, request_id, occurrence_id, title, message)
+                                VALUES (?, ?, ?, 'Upcoming equipment release', ?)
+                                """)) {
+                            ins.setLong(1, userId);
+                            ins.setLong(2, reqId);
+                            ins.setLong(3, occId);
+                            ins.setString(4, msg);
+                            ins.executeUpdate();
+                        }
+                        try (PreparedStatement upd = connection.prepareStatement(
+                                "UPDATE request_occurrences SET release_notified = TRUE WHERE occurrence_id = ?")) {
+                            upd.setLong(1, occId);
+                            upd.executeUpdate();
+                        }
+                    }
+                }
+            }
+            connection.commit();
+        } catch (SQLException e) {
+            // ignore if schema not migrated yet
+            if (e.getMessage() != null && e.getMessage().contains("release_notified")) return;
+            throw e;
         }
     }
 }

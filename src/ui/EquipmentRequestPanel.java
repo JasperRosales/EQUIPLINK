@@ -4,6 +4,7 @@ import src.model.BorrowRequest;
 import src.model.BorrowRequestForm;
 import src.model.Equipment;
 import src.model.EquipmentRequestItem;
+import src.model.RequestOccurrence;
 import src.model.User;
 import src.controller.BorrowRequestController;
 import src.controller.EquipmentController;
@@ -48,6 +49,7 @@ import java.util.Locale;
 public class EquipmentRequestPanel extends JPanel {
 
     private final long borrowerId;
+    private final boolean facultyMonthly;
     private final BorrowRequestController requestController;
     private final EquipmentController equipmentController;
     private final BorrowRequest existingRequest;
@@ -64,10 +66,12 @@ public class EquipmentRequestPanel extends JPanel {
     private final JTextField position = new JTextField();
     private final JTextArea purpose = new JTextArea(4, 25);
     private final JPanel selectedItemsPanel = new JPanel();
+    private final JPanel schedulesPanel = new JPanel();
     private final JLabel inventoryNote = new JLabel("Loading campus inventory…");
     private final PrimaryButton saveButton;
     private final List<Equipment> availableEquipment = new ArrayList<>();
     private final List<EquipmentRequestItem> selectedItems = new ArrayList<>();
+    private final List<ScheduleRow> scheduleRows = new ArrayList<>();
     private Timer availabilityTimer;
 
     public EquipmentRequestPanel(
@@ -89,6 +93,7 @@ public class EquipmentRequestPanel extends JPanel {
             Runnable onSaved,
             List<EquipmentRequestItem> preselected) {
         this.borrowerId = user.getUserId();
+        this.facultyMonthly = "FACULTY".equalsIgnoreCase(user.getBorrowerType());
         this.requestController = requestController;
         this.equipmentController = equipmentController;
         this.existingRequest = existingRequest;
@@ -151,6 +156,18 @@ public class EquipmentRequestPanel extends JPanel {
             position.setText(existingRequest.getPosition());
             purpose.setText(existingRequest.getPurpose());
             selectedItems.addAll(existingRequest.getEquipmentItems());
+            if (existingRequest.getOccurrences() != null && !existingRequest.getOccurrences().isEmpty()) {
+                for (RequestOccurrence o : existingRequest.getOccurrences()) {
+                    scheduleRows.add(new ScheduleRow(o.getEventDate(), o.getStartTime(), o.getEndTime(), o.getVenue()));
+                }
+            } else if (facultyMonthly) {
+                scheduleRows.add(new ScheduleRow(existingRequest.getEventDate(), existingRequest.getStartTime(),
+                        existingRequest.getEndTime(), existingRequest.getVenue()));
+            }
+        } else if (facultyMonthly) {
+            // start with one empty schedule row prefilled from fields after init
+            scheduleRows.add(new ScheduleRow(LocalDate.now().plusDays(1), LocalTime.of(9,0), LocalTime.of(10,0),
+                    venue.getText() == null ? "" : venue.getText()));
         }
     }
 
@@ -161,7 +178,9 @@ public class EquipmentRequestPanel extends JPanel {
                 ? "Tell us what you need" : "Update your request");
         heading.setFont(AppTheme.semibold(18));
         heading.setForeground(AppTheme.foreground());
-        JLabel hint = new JLabel("Complete the activity details, then add equipment from campus inventory.");
+        JLabel hint = new JLabel(facultyMonthly
+                ? "Faculty monthly request: add one or more schedules, then add equipment."
+                : "Complete the activity details, then add equipment from campus inventory.");
         hint.setFont(AppTheme.regular(11));
         hint.setForeground(AppTheme.muted());
         introduction.add(heading, BorderLayout.NORTH);
@@ -181,17 +200,47 @@ public class EquipmentRequestPanel extends JPanel {
         styleField(personInCharge);
         styleField(position);
         styleArea(purpose);
-        addFormField(eventCard, "Venue", venue, 1, 0);
-        addFormField(eventCard, "Event date (YYYY-MM-DD)", eventDate, 1, 1);
-        addFormField(eventCard, "Start time (hh:mm AM/PM)", startTime, 2, 0);
-        addFormField(eventCard, "End time (hh:mm AM/PM)", endTime, 2, 1);
-        addFormField(eventCard, "Participants", participants, 3, 0);
-        addFormField(eventCard, "Person in charge", personInCharge, 3, 1);
-        addFormField(eventCard, "Position", position, 4, 0);
-        addFormField(eventCard, "Purpose", new JScrollPane(purpose), 4, 1);
+        int row = 1;
+        addFormField(eventCard, "Venue", venue, row, 0);
+        addFormField(eventCard, "Event date (YYYY-MM-DD)", eventDate, row++, 1);
+        addFormField(eventCard, "Start time (hh:mm AM/PM)", startTime, row, 0);
+        addFormField(eventCard, "End time (hh:mm AM/PM)", endTime, row++, 1);
+        addFormField(eventCard, "Participants", participants, row, 0);
+        addFormField(eventCard, "Person in charge", personInCharge, row++, 1);
+        addFormField(eventCard, "Position", position, row, 0);
+        addFormField(eventCard, "Purpose", new JScrollPane(purpose), row++, 1);
         eventCard.setAlignmentX(Component.LEFT_ALIGNMENT);
         add(eventCard);
         add(Box.createVerticalStrut(14));
+
+        if (facultyMonthly) {
+            SurfacePanel schedCard = new SurfacePanel();
+            schedCard.setLayout(new BoxLayout(schedCard, BoxLayout.Y_AXIS));
+            JLabel sh = new JLabel("Monthly schedules (each occurrence)");
+            sh.setFont(AppTheme.semibold(15));
+            sh.setForeground(AppTheme.foreground());
+            schedCard.add(sh);
+            schedCard.add(Box.createVerticalStrut(4));
+            JLabel sn = new JLabel("Add all dates/times for this monthly request. Staff will assign equipment per schedule.");
+            sn.setFont(AppTheme.regular(10));
+            sn.setForeground(AppTheme.muted());
+            schedCard.add(sn);
+            schedCard.add(Box.createVerticalStrut(10));
+            schedulesPanel.setOpaque(false);
+            schedulesPanel.setLayout(new BoxLayout(schedulesPanel, BoxLayout.Y_AXIS));
+            schedCard.add(schedulesPanel);
+            PrimaryButton addSched = new PrimaryButton("Add schedule", PrimaryButton.Style.SECONDARY);
+            addSched.addActionListener(e -> addScheduleFromFields());
+            JPanel ap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            ap.setOpaque(false);
+            ap.add(addSched);
+            schedCard.add(Box.createVerticalStrut(8));
+            schedCard.add(ap);
+            schedCard.setAlignmentX(Component.LEFT_ALIGNMENT);
+            add(schedCard);
+            add(Box.createVerticalStrut(14));
+            renderSchedules();
+        }
 
         SurfacePanel equipmentCard = new SurfacePanel();
         equipmentCard.setLayout(new BoxLayout(equipmentCard, BoxLayout.Y_AXIS));
@@ -432,6 +481,52 @@ public class EquipmentRequestPanel extends JPanel {
                 0, 0, 0);
     }
 
+    private void addScheduleFromFields() {
+        try {
+            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            LocalDate d = LocalDate.parse(eventDate.getText().trim());
+            LocalTime st = parseTime(startTime.getText());
+            LocalTime et = parseTime(endTime.getText());
+            if (v.isBlank()) throw new IllegalArgumentException("Venue is required.");
+            scheduleRows.add(new ScheduleRow(d, st, et, v));
+            renderSchedules();
+        } catch (Exception ex) {
+            showMessage("Enter a valid venue/date/time, then click Add schedule.", "Check schedule");
+        }
+    }
+
+    private void renderSchedules() {
+        schedulesPanel.removeAll();
+        if (scheduleRows.isEmpty()) {
+            JLabel empty = new JLabel("No schedules added yet. Fill the fields above and click \"Add schedule\".");
+            empty.setFont(AppTheme.regular(11));
+            empty.setForeground(AppTheme.muted());
+            schedulesPanel.add(empty);
+        } else {
+            DateTimeFormatter tf = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
+            for (int i = 0; i < scheduleRows.size(); i++) {
+                ScheduleRow r = scheduleRows.get(i);
+                JPanel row = new JPanel(new BorderLayout(8, 0));
+                row.setOpaque(true);
+                row.setBackground(AppTheme.elevatedSurface());
+                row.setBorder(new EmptyBorder(8, 10, 8, 8));
+                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
+                JLabel lbl = new JLabel((i + 1) + ". " + r.date + "  " + r.start.format(tf) + "–" + r.end.format(tf) + "  ·  " + r.venue);
+                lbl.setFont(AppTheme.regular(11));
+                lbl.setForeground(AppTheme.foreground());
+                PrimaryButton rm = new PrimaryButton("Remove", PrimaryButton.Style.DANGER);
+                int idx = i;
+                rm.addActionListener(e -> { scheduleRows.remove(idx); renderSchedules(); });
+                row.add(lbl, BorderLayout.CENTER);
+                row.add(rm, BorderLayout.EAST);
+                schedulesPanel.add(row);
+                schedulesPanel.add(Box.createVerticalStrut(6));
+            }
+        }
+        schedulesPanel.revalidate();
+        schedulesPanel.repaint();
+    }
+
     private void renderSelectedItems() {
         selectedItemsPanel.removeAll();
         if (selectedItems.isEmpty()) {
@@ -477,19 +572,39 @@ public class EquipmentRequestPanel extends JPanel {
     private void saveRequest() {
         BorrowRequestForm form;
         try {
+            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            LocalDate d = LocalDate.parse(eventDate.getText().trim());
+            LocalTime st = parseTime(startTime.getText());
+            LocalTime et = parseTime(endTime.getText());
+            List<RequestOccurrence> occs = new ArrayList<>();
+            if (facultyMonthly) {
+                if (scheduleRows.isEmpty()) {
+                    showMessage("Add at least one schedule for this monthly faculty request.",
+                            "Missing schedule");
+                    return;
+                }
+                for (ScheduleRow r : scheduleRows) occs.add(r.toOccurrence());
+            } else {
+                occs.add(new RequestOccurrence(d, st, et, v));
+            }
+            RequestOccurrence first = occs.get(0);
             form = new BorrowRequestForm(
-                    venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT),
-                    LocalDate.parse(eventDate.getText().trim()),
-                    parseTime(startTime.getText()),
-                    parseTime(endTime.getText()),
+                    first.getVenue(),
+                    first.getEventDate(),
+                    first.getStartTime(),
+                    first.getEndTime(),
                     purpose.getText(),
                     participants.getText(),
                     personInCharge.getText(),
                     position.getText(),
-                    selectedItems);
+                    selectedItems,
+                    occs);
         } catch (DateTimeParseException exception) {
             showMessage("Use YYYY-MM-DD for date and hh:mm AM/PM for times (e.g. 09:00 AM).",
                     "Check date and time");
+            return;
+        } catch (IllegalArgumentException exception) {
+            showMessage(exception.getMessage(), "Check schedule");
             return;
         }
 
@@ -532,6 +647,12 @@ public class EquipmentRequestPanel extends JPanel {
     private void showMessage(String message, String title) {
         javax.swing.JOptionPane.showMessageDialog(
                 this, message, title, javax.swing.JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static class ScheduleRow {
+        final LocalDate date; final LocalTime start; final LocalTime end; final String venue;
+        ScheduleRow(LocalDate d, LocalTime s, LocalTime e, String v){date=d;start=s;end=e;venue=v==null?"":v.toUpperCase(Locale.ROOT);}
+        RequestOccurrence toOccurrence(){ return new RequestOccurrence(date,start,end,venue); }
     }
 
     private static class EquipmentRenderer extends DefaultListCellRenderer {

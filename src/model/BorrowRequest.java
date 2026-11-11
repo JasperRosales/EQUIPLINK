@@ -25,6 +25,7 @@ public class BorrowRequest {
     private final String remarks;
     private final LocalDateTime submittedAt;
     private final List<EquipmentRequestItem> equipmentItems;
+    private final List<RequestOccurrence> occurrences;
     private String borrowerType;
 
     /** Faculty first, then everything else; stable for other orderings. */
@@ -48,6 +49,29 @@ public class BorrowRequest {
             String remarks,
             LocalDateTime submittedAt,
             List<EquipmentRequestItem> equipmentItems) {
+        this(requestId, requestCode, borrowerId, borrowerName, venue, eventDate, startTime, endTime,
+                purpose, participants, personInCharge, position, status, remarks, submittedAt,
+                equipmentItems, List.of());
+    }
+
+    public BorrowRequest(
+            long requestId,
+            String requestCode,
+            long borrowerId,
+            String borrowerName,
+            String venue,
+            LocalDate eventDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            String purpose,
+            String participants,
+            String personInCharge,
+            String position,
+            String status,
+            String remarks,
+            LocalDateTime submittedAt,
+            List<EquipmentRequestItem> equipmentItems,
+            List<RequestOccurrence> occurrences) {
         this.requestId = requestId;
         this.requestCode = requestCode;
         this.borrowerId = borrowerId;
@@ -65,6 +89,8 @@ public class BorrowRequest {
         this.submittedAt = submittedAt;
         this.equipmentItems = Collections.unmodifiableList(
                 new ArrayList<>(equipmentItems == null ? List.of() : equipmentItems));
+        this.occurrences = Collections.unmodifiableList(
+                new ArrayList<>(occurrences == null ? List.of() : occurrences));
     }
 
     public long getRequestId() { return requestId; }
@@ -83,6 +109,7 @@ public class BorrowRequest {
     public String getRemarks() { return remarks; }
     public LocalDateTime getSubmittedAt() { return submittedAt; }
     public List<EquipmentRequestItem> getEquipmentItems() { return equipmentItems; }
+    public List<RequestOccurrence> getOccurrences() { return occurrences; }
 
     public String getBorrowerType() {
         return borrowerType;

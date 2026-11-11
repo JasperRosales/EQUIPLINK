@@ -17,6 +17,7 @@ public class BorrowRequestForm {
     private final String personInCharge;
     private final String position;
     private final List<EquipmentRequestItem> equipmentItems;
+    private final List<RequestOccurrence> occurrences;
 
     public BorrowRequestForm(
             String venue,
@@ -28,6 +29,21 @@ public class BorrowRequestForm {
             String personInCharge,
             String position,
             List<EquipmentRequestItem> equipmentItems) {
+        this(venue, eventDate, startTime, endTime, purpose, participants,
+                personInCharge, position, equipmentItems, List.of());
+    }
+
+    public BorrowRequestForm(
+            String venue,
+            LocalDate eventDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            String purpose,
+            String participants,
+            String personInCharge,
+            String position,
+            List<EquipmentRequestItem> equipmentItems,
+            List<RequestOccurrence> occurrences) {
         this.venue = venue == null ? "" : venue.trim();
         this.eventDate = eventDate;
         this.startTime = startTime;
@@ -38,6 +54,8 @@ public class BorrowRequestForm {
         this.position = position == null ? "" : position.trim();
         this.equipmentItems = Collections.unmodifiableList(
                 new ArrayList<>(equipmentItems == null ? List.of() : equipmentItems));
+        List<RequestOccurrence> occ = occurrences == null ? List.of() : occurrences;
+        this.occurrences = Collections.unmodifiableList(new ArrayList<>(occ));
     }
 
     public String getVenue() { return venue; }
@@ -49,4 +67,5 @@ public class BorrowRequestForm {
     public String getPersonInCharge() { return personInCharge; }
     public String getPosition() { return position; }
     public List<EquipmentRequestItem> getEquipmentItems() { return equipmentItems; }
+    public List<RequestOccurrence> getOccurrences() { return occurrences; }
 }
