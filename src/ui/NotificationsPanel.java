@@ -22,10 +22,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 public class NotificationsPanel extends JPanel {
 
@@ -35,9 +33,9 @@ public class NotificationsPanel extends JPanel {
     private final PrimaryButton markAllRead = new PrimaryButton(
             "Mark all read", PrimaryButton.Style.SECONDARY);
     private final JTextField search = new JTextField(18);
-    private final JComboBox<String> categoryFilter = new JComboBox<>(new String[] { "All categories" });
-    private final JComboBox<String> readFilter = new JComboBox<>(new String[] { "All", "Unread", "Read" });
-    private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first", "Category" });
+    private final JComboBox<String> typeFilter = new JComboBox<>(new String[] {
+            "All", "Unread", "Request", "Borrowing & Returns", "Account" });
+    private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first" });
     private final DateFilter dateFilter = new DateFilter();
     private List<Notification> notifications = List.of();
 
@@ -93,15 +91,12 @@ public class NotificationsPanel extends JPanel {
 
         JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         tools.setOpaque(false);
-        styleCombo(categoryFilter, 150);
-        styleCombo(readFilter, 110);
+        styleCombo(typeFilter, 175);
         styleCombo(dateSort, 140);
-        categoryFilter.addActionListener(event -> showNotifications());
-        readFilter.addActionListener(event -> showNotifications());
+        typeFilter.addActionListener(event -> showNotifications());
         dateSort.addActionListener(event -> showNotifications());
         dateFilter.addChangeListener(this::showNotifications);
-        tools.add(categoryFilter);
-        tools.add(readFilter);
+        tools.add(typeFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
         filters.add(tools, BorderLayout.EAST);
@@ -128,7 +123,6 @@ public class NotificationsPanel extends JPanel {
             protected void done() {
                 try {
                     notifications = get();
-                    refreshCategoryFilter();
                     showNotifications();
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
@@ -141,26 +135,6 @@ public class NotificationsPanel extends JPanel {
                 }
             }
         }.execute();
-    }
-
-    private void refreshCategoryFilter() {
-        Object selected = categoryFilter.getSelectedItem();
-        Set<String> categories = new LinkedHashSet<>();
-        for (Notification notification : notifications) {
-            for (String category : splitValues(notification.getRequestCategories())) {
-                categories.add(category);
-            }
-        }
-        categoryFilter.removeAllItems();
-        categoryFilter.addItem("All categories");
-        categories.stream().sorted(String.CASE_INSENSITIVE_ORDER)
-                .forEach(categoryFilter::addItem);
-        if (selected != null) {
-            categoryFilter.setSelectedItem(selected);
-        }
-        if (categoryFilter.getSelectedIndex() < 0) {
-            categoryFilter.setSelectedIndex(0);
-        }
     }
 
     private void showNotifications() {
@@ -195,15 +169,14 @@ public class NotificationsPanel extends JPanel {
 
     private List<Notification> filteredNotifications() {
         String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
-        String selectedCategory = String.valueOf(categoryFilter.getSelectedItem());
-        String selectedRead = String.valueOf(readFilter.getSelectedItem());
+        String type = String.valueOf(typeFilter.getSelectedItem());
         int sortMode = dateSort.getSelectedIndex();
         List<Notification> filtered = new ArrayList<>();
         for (Notification n : notifications) {
-            if ("Unread".equals(selectedRead) && n.isRead()) {
+            if ("Unread".equals(type) && n.isRead()) {
                 continue;
             }
-            if ("Read".equals(selectedRead) && !n.isRead()) {
+            if (!"All".equals(type) && !"Unread".equals(type) && !matchesType(n, type)) {
                 continue;
             }
             if (!query.isEmpty()) {
@@ -214,33 +187,37 @@ public class NotificationsPanel extends JPanel {
                     continue;
                 }
             }
-            if (selectedCategory != null && !"All categories".equals(selectedCategory)) {
-                boolean match = splitValues(n.getRequestCategories()).stream()
-                        .anyMatch(c -> c.equalsIgnoreCase(selectedCategory));
-                if (!match) {
-                    continue;
-                }
-            }
             LocalDate createdDate = n.getCreatedAt() == null ? null : n.getCreatedAt().toLocalDate();
             if (!dateFilter.matches(createdDate)) {
                 continue;
             }
             filtered.add(n);
         }
-        Comparator<Notification> cmp;
-        if (sortMode == 2) {
-            cmp = Comparator.comparing((Notification n) -> safe(n.getRequestCategories()).toLowerCase(Locale.ROOT))
-                    .thenComparing(Comparator.comparing(Notification::getCreatedAt,
-                            Comparator.nullsLast(Comparator.naturalOrder())).reversed());
-        } else {
-            cmp = Comparator.comparing(Notification::getCreatedAt,
-                    Comparator.nullsLast(Comparator.naturalOrder()));
-            if (sortMode <= 0) {
-                cmp = cmp.reversed();
-            }
+        Comparator<Notification> cmp = Comparator.comparing(Notification::getCreatedAt,
+                Comparator.nullsLast(Comparator.naturalOrder()));
+        if (sortMode <= 0) {
+            cmp = cmp.reversed();
         }
         filtered.sort(cmp.thenComparing(Comparator.comparingLong(Notification::getNotificationId).reversed()));
         return filtered;
+    }
+
+    private boolean matchesType(Notification n, String type) {
+        String title = safe(n.getTitle()).toLowerCase(Locale.ROOT);
+        String msg = safe(n.getMessage()).toLowerCase(Locale.ROOT);
+        boolean account = title.contains("password") || title.contains("account")
+                || msg.contains("password") || msg.contains("account");
+        boolean borrowReturn = title.contains("release") || title.contains("return")
+                || title.contains("completed") || msg.contains("release")
+                || msg.contains("returned") || msg.contains("return")
+                || msg.contains("completed transaction") || msg.contains("borrowed");
+        boolean request = n.getRequestId() != null || title.contains("request")
+                || title.contains("approval") || title.contains("submitted")
+                || msg.contains("request") || msg.contains("approval");
+        if ("Account".equals(type)) return account;
+        if ("Borrowing & Returns".equals(type)) return borrowReturn && !account;
+        if ("Request".equals(type)) return request && !borrowReturn && !account;
+        return true;
     }
 
     private List<String> splitValues(String csv) {
