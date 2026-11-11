@@ -50,7 +50,7 @@ public class DateFilter extends PrimaryButton {
         setIcon(new ChevronIcon());
         setHorizontalTextPosition(LEFT);
         setIconTextGap(8);
-        setToolTipText("Filter by event date");
+        setToolTipText("Filter by date");
         buildPopup();
         addActionListener(event -> {
             shownMonth = from == null ? YearMonth.now() : YearMonth.from(from);

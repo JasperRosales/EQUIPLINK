@@ -36,6 +36,7 @@ public class NotificationsPanel extends JPanel {
             "Mark all read", PrimaryButton.Style.SECONDARY);
     private final JTextField search = new JTextField(18);
     private final JComboBox<String> categoryFilter = new JComboBox<>(new String[] { "All categories" });
+    private final JComboBox<String> readFilter = new JComboBox<>(new String[] { "All", "Unread", "Read" });
     private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first", "Category" });
     private final DateFilter dateFilter = new DateFilter();
     private List<Notification> notifications = List.of();
@@ -92,12 +93,15 @@ public class NotificationsPanel extends JPanel {
 
         JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         tools.setOpaque(false);
-        styleCombo(categoryFilter, 170);
-        styleCombo(dateSort, 150);
+        styleCombo(categoryFilter, 150);
+        styleCombo(readFilter, 110);
+        styleCombo(dateSort, 140);
         categoryFilter.addActionListener(event -> showNotifications());
+        readFilter.addActionListener(event -> showNotifications());
         dateSort.addActionListener(event -> showNotifications());
         dateFilter.addChangeListener(this::showNotifications);
         tools.add(categoryFilter);
+        tools.add(readFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
         filters.add(tools, BorderLayout.EAST);
@@ -192,9 +196,16 @@ public class NotificationsPanel extends JPanel {
     private List<Notification> filteredNotifications() {
         String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
         String selectedCategory = String.valueOf(categoryFilter.getSelectedItem());
+        String selectedRead = String.valueOf(readFilter.getSelectedItem());
         int sortMode = dateSort.getSelectedIndex();
         List<Notification> filtered = new ArrayList<>();
         for (Notification n : notifications) {
+            if ("Unread".equals(selectedRead) && n.isRead()) {
+                continue;
+            }
+            if ("Read".equals(selectedRead) && !n.isRead()) {
+                continue;
+            }
             if (!query.isEmpty()) {
                 String haystack = (safe(n.getTitle()) + " " + safe(n.getMessage()) + " "
                         + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()))
@@ -210,8 +221,8 @@ public class NotificationsPanel extends JPanel {
                     continue;
                 }
             }
-            LocalDate date = n.getEventDate() != null ? n.getEventDate() : n.getCreatedAt().toLocalDate();
-            if (!dateFilter.matches(date)) {
+            LocalDate createdDate = n.getCreatedAt() == null ? null : n.getCreatedAt().toLocalDate();
+            if (!dateFilter.matches(createdDate)) {
                 continue;
             }
             filtered.add(n);
@@ -219,9 +230,11 @@ public class NotificationsPanel extends JPanel {
         Comparator<Notification> cmp;
         if (sortMode == 2) {
             cmp = Comparator.comparing((Notification n) -> safe(n.getRequestCategories()).toLowerCase(Locale.ROOT))
-                    .thenComparing(Comparator.comparing(Notification::getCreatedAt).reversed());
+                    .thenComparing(Comparator.comparing(Notification::getCreatedAt,
+                            Comparator.nullsLast(Comparator.naturalOrder())).reversed());
         } else {
-            cmp = Comparator.comparing(Notification::getCreatedAt);
+            cmp = Comparator.comparing(Notification::getCreatedAt,
+                    Comparator.nullsLast(Comparator.naturalOrder()));
             if (sortMode <= 0) {
                 cmp = cmp.reversed();
             }
@@ -299,15 +312,16 @@ public class NotificationsPanel extends JPanel {
                 + content + "</div></html>");
         message.setFont(AppTheme.regular(11));
         message.setForeground(AppTheme.muted());
-        String date = notification.getCreatedAt().format(
-                DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a"));
+        String created = notification.getCreatedAt() == null ? "—"
+                : notification.getCreatedAt().format(
+                        DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a")) + " (PHT)";
         String req = notification.getRequestId() == null
                 ? "" : "  ·  Request #" + notification.getRequestId();
         if (notification.getEventDate() != null) {
             req += "  ·  Event " + notification.getEventDate().format(
                     DateTimeFormatter.ofPattern("MMM d, yyyy"));
         }
-        JLabel time = new JLabel(date + req);
+        JLabel time = new JLabel("Created " + created + req);
         time.setFont(AppTheme.regular(10.5f));
         time.setForeground(AppTheme.muted());
         body.add(title);
