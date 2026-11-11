@@ -32,8 +32,7 @@ public class MyRequestsPanel extends JPanel {
     private final Runnable changedHandler;
     private final JPanel requestCards = new JPanel();
     private final JTextField search = new JTextField(22);
-    private final src.ui.components.DateFilter dateFilter =
-            new src.ui.components.DateFilter();
+    private final src.ui.components.DateFilter dateFilter = new src.ui.components.DateFilter();
     private final JComboBox<String> dateSort = new JComboBox<>(
             new String[] { "Newest first", "Oldest first" });
     private final String statusFilter;
@@ -111,7 +110,8 @@ public class MyRequestsPanel extends JPanel {
                     showRequests();
                 } catch (Exception exception) {
                     String message = exception.getCause() == null
-                            ? exception.getMessage() : exception.getCause().getMessage();
+                            ? exception.getMessage()
+                            : exception.getCause().getMessage();
                     showError("Unable to load your requests: " + message);
                 }
             }
@@ -175,14 +175,16 @@ public class MyRequestsPanel extends JPanel {
     }
 
     private JPanel requestCard(BorrowRequest request) {
-        final float[] hover = {0f};
+        final float[] hover = { 0f };
         SurfacePanel card = new SurfacePanel() {
             @Override
             protected void paintBorder(java.awt.Graphics graphics) {
                 super.paintBorder(graphics);
-                if (hover[0] <= 0f) return;
+                if (hover[0] <= 0f)
+                    return;
                 java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
-                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
                 g.setColor(AppTheme.alpha(new java.awt.Color(0, 0, 128), Math.round(255 * hover[0])));
                 g.setStroke(new java.awt.BasicStroke(2f));
                 int m = SurfacePanel.MARGIN;
@@ -194,13 +196,26 @@ public class MyRequestsPanel extends JPanel {
         hoverTimer.addActionListener(event -> {
             boolean inside = card.getMousePosition() != null;
             float target = inside ? 1f : 0f, step = 15f / 200f;
-            if (Math.abs(hover[0] - target) <= step) { hover[0] = target; hoverTimer.stop(); }
-            else { hover[0] += hover[0] < target ? step : -step; }
+            if (Math.abs(hover[0] - target) <= step) {
+                hover[0] = target;
+                hoverTimer.stop();
+            } else {
+                hover[0] += hover[0] < target ? step : -step;
+            }
             card.repaint();
         });
         card.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override public void mouseEntered(java.awt.event.MouseEvent e) { if (!hoverTimer.isRunning()) hoverTimer.start(); }
-            @Override public void mouseExited(java.awt.event.MouseEvent e) { if (!hoverTimer.isRunning()) hoverTimer.start(); }
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (!hoverTimer.isRunning())
+                    hoverTimer.start();
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                if (!hoverTimer.isRunning())
+                    hoverTimer.start();
+            }
         });
         card.setLayout(new BorderLayout(15, 7));
         JPanel details = new JPanel();
@@ -287,7 +302,8 @@ public class MyRequestsPanel extends JPanel {
                     changedHandler.run();
                 } catch (Exception exception) {
                     String message = exception.getCause() == null
-                            ? exception.getMessage() : exception.getCause().getMessage();
+                            ? exception.getMessage()
+                            : exception.getCause().getMessage();
                     JOptionPane.showMessageDialog(
                             MyRequestsPanel.this, message, "Unable to delete request",
                             JOptionPane.ERROR_MESSAGE);
