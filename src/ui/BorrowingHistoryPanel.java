@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-public class BorrowingHistoryPanel extends JPanel {
+public class BorrowingHistoryPanel extends JPanel implements Refreshable {
 
     private final long borrowerId;
     private final BorrowRequestController requestController;
@@ -31,7 +31,7 @@ public class BorrowingHistoryPanel extends JPanel {
 
     private final JTextField search = new JTextField(18);
     private final JComboBox<String> statusFilter = new JComboBox<>(
-            new String[] { "All history", "Completed", "Rejected", "Cancelled" });
+            new String[] { "All history", "Completed", "Declined", "Cancelled" });
     private final src.ui.components.DateFilter dateFilter =
             new src.ui.components.DateFilter();
     private List<BorrowRequest> loaded = List.of();
@@ -86,6 +86,25 @@ public class BorrowingHistoryPanel extends JPanel {
         loadHistory();
     }
 
+    @Override
+    public void reloadData() {
+        new SwingWorker<List<BorrowRequest>, Void>() {
+            @Override
+            protected List<BorrowRequest> doInBackground() throws Exception {
+                return requestController.findBorrowingHistory(borrowerId);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    showHistory(get());
+                } catch (Exception ignored) {
+                    // Keep the current list; the next poll or manual reload retries.
+                }
+            }
+        }.execute();
+    }
+
     private void loadHistory() {
         historyList.removeAll();
         historyList.add(message("Loading borrowing history…", false));
@@ -121,7 +140,7 @@ public class BorrowingHistoryPanel extends JPanel {
                 continue;
             }
             if ("Completed".equals(status) && !"COMPLETED".equals(request.getStatus())) continue;
-            if ("Rejected".equals(status) && !"REJECTED".equals(request.getStatus())) continue;
+            if ("Declined".equals(status) && !"REJECTED".equals(request.getStatus())) continue;
             if ("Cancelled".equals(status) && !"CANCELLED".equals(request.getStatus())) continue;
             if (!query.isEmpty() && !matchesQuery(request, query)) {
                 continue;
@@ -170,10 +189,8 @@ public class BorrowingHistoryPanel extends JPanel {
         JLabel code = new JLabel(request.getRequestCode());
         code.setFont(AppTheme.semibold(13));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
-        status.setHorizontalAlignment(SwingConstants.RIGHT);
         titleRow.add(code, BorderLayout.WEST);
-        titleRow.add(status, BorderLayout.EAST);
+        titleRow.add(UiSupport.statusBadges(request, null, true), BorderLayout.EAST);
         DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
         JLabel subtitle = new JLabel(request.getVenue() + "  ·  "
                 + request.getEventDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))

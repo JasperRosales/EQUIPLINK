@@ -151,15 +151,6 @@ public final class DatabaseInitializer {
                         CHECK (end_time > start_time)
                     )
                     """,
-            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
-            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
-            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS substitute_equipment_id BIGINT REFERENCES equipment(equipment_id)",
-            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS unavailable_remarks TEXT",
-            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
-            "ALTER TABLE request_groups DROP CONSTRAINT IF EXISTS request_groups_request_id_custodian_role_key",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_request_groups_occ_role ON request_groups(occurrence_id, custodian_role) WHERE occurrence_id IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_occurrences_request ON request_occurrences(request_id, event_date, start_time)",
-
             // 4. REQUEST GROUPS
             """
                     CREATE TABLE IF NOT EXISTS request_groups (
@@ -176,7 +167,7 @@ public final class DatabaseInitializer {
                         status VARCHAR(20) NOT NULL
                             CHECK (status IN (
                                 'PENDING', 'ASSIGNED', 'UNABLE',
-                                'RELEASED', 'RETURNED',
+                                'RELEASED', 'RETURNED', 'DECLINED',
                                 'CANCELLED', 'NOT_REQUIRED'
                             )),
 
@@ -275,6 +266,40 @@ public final class DatabaseInitializer {
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """,
+
+            // MIGRATIONS (run after every table exists)
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS substitute_equipment_id BIGINT REFERENCES equipment(equipment_id)",
+            "ALTER TABLE request_items ADD COLUMN IF NOT EXISTS unavailable_remarks TEXT",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS occurrence_id BIGINT REFERENCES request_occurrences(occurrence_id) ON DELETE CASCADE",
+            "ALTER TABLE request_groups DROP CONSTRAINT IF EXISTS request_groups_request_id_custodian_role_key",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_request_groups_occ_role ON request_groups(occurrence_id, custodian_role) WHERE occurrence_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_occurrences_request ON request_occurrences(request_id, event_date, start_time)",
+
+
+            // Independent department (ICT / Facility) decisions
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS declined_by BIGINT REFERENCES users(user_id)",
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS declined_at TIMESTAMP",
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS overdue_notified BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE request_groups DROP CONSTRAINT IF EXISTS request_groups_status_check",
+            """
+                    ALTER TABLE request_groups ADD CONSTRAINT request_groups_status_check
+                    CHECK (status IN (
+                        'PENDING', 'ASSIGNED', 'UNABLE', 'RELEASED', 'RETURNED',
+                        'DECLINED', 'CANCELLED', 'NOT_REQUIRED'
+                    ))
+                    """,
+            "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS overdue_notified BOOLEAN NOT NULL DEFAULT FALSE",
+
+            // Notification details, per-user read and delete state
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS department VARCHAR(20)",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action VARCHAR(40)",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMP",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_user_visible ON notifications(user_id, is_deleted, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_history_latest ON request_history(history_id)",
 
             // INDEXES
             """

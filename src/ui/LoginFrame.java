@@ -129,9 +129,12 @@ public class LoginFrame extends JFrame {
         passwordRow.setOpaque(false);
         passwordRow.add(password, BorderLayout.CENTER);
         char defaultEcho = password.getEchoChar();
-        JToggleButton togglePassword = new JToggleButton("\uD83D\uDC41");
+        JToggleButton togglePassword = new JToggleButton(
+                new src.ui.components.EyeIcon(false, AppTheme.muted(), 18));
+        togglePassword.setSelectedIcon(
+                new src.ui.components.EyeIcon(true, AppTheme.primary(), 18));
         togglePassword.setToolTipText("Show password");
-        togglePassword.setFont(AppTheme.regular(14));
+        togglePassword.getAccessibleContext().setAccessibleName("Show or hide password");
         togglePassword.setPreferredSize(new Dimension(44, 45));
         togglePassword.setFocusable(false);
         togglePassword.setBorder(BorderFactory.createEmptyBorder());

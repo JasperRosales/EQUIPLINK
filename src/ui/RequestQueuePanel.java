@@ -2,7 +2,9 @@ package src.ui;
 
 import src.controller.BorrowRequestController;
 import src.model.BorrowRequest;
+import src.model.DepartmentStatus;
 import src.model.EquipmentRequestItem;
+import src.model.RequestStatus;
 import src.model.User;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
@@ -23,7 +25,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-public class RequestQueuePanel extends JPanel {
+public class RequestQueuePanel extends JPanel implements Refreshable {
 
     public enum Mode {
         STAFF_QUEUE,
@@ -44,16 +46,36 @@ public class RequestQueuePanel extends JPanel {
             new src.ui.components.DateFilter();
     private final javax.swing.JComboBox<String> priorityFilter = new javax.swing.JComboBox<>(
             new String[] { "All borrowers", "Faculty (priority)", "Students" });
-    private final javax.swing.JComboBox<String> statusFilter = new javax.swing.JComboBox<>(
-            new String[] { "All statuses", "Approved", "Rejected", "Staff review", "Admin review" });
+    private final javax.swing.JComboBox<RequestStatus.Category> statusFilter =
+            new javax.swing.JComboBox<>(RequestStatus.Category.values());
+    private final javax.swing.JComboBox<String> departmentFilter = new javax.swing.JComboBox<>(
+            new String[] { "All departments", "ICT equipment", "Facility equipment" });
+    private final javax.swing.JComboBox<String> decisionFilter = new javax.swing.JComboBox<>(
+            new String[] { "Any department decision", "Department pending", "Department approved",
+                    "Department declined", "Department released", "Department returned",
+                    "Department not assigned" });
+    private final JLabel resultCount = new JLabel(" ");
     private final JPanel requestList = new JPanel();
+    private final String scopeRole;
     private List<BorrowRequest> requests = List.of();
+    private boolean loading;
 
     public RequestQueuePanel(
             User actor, BorrowRequestController requestController, Mode mode) {
+        this(actor, requestController, mode, null);
+    }
+
+    /** @param initialFilter status category label to preselect, e.g. "Declined". */
+    public RequestQueuePanel(
+            User actor, BorrowRequestController requestController, Mode mode,
+            String initialFilter) {
         this.actor = actor;
         this.requestController = requestController;
         this.mode = mode;
+        this.scopeRole = isStaffActor(actor) ? actor.getRole().toUpperCase() : null;
+        if (initialFilter != null) {
+            statusFilter.setSelectedItem(RequestStatus.Category.fromLabel(initialFilter));
+        }
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(AppTheme.background());
         setBorder(new EmptyBorder(2, 2, 22, 2));
@@ -82,6 +104,7 @@ public class RequestQueuePanel extends JPanel {
         header.add(text, BorderLayout.NORTH);
 
         JPanel filters = new JPanel(new BorderLayout(10, 0));
+        // Search + date tools on the first row, status/department filters below.
         filters.setOpaque(false);
         UiSupport.styleInput(search);
         search.putClientProperty("JTextField.placeholderText",
@@ -95,30 +118,63 @@ public class RequestQueuePanel extends JPanel {
         dateSort.setPreferredSize(new java.awt.Dimension(150, 40));
         dateSort.addActionListener(event -> showRequests());
         dateFilter.addChangeListener(this::showRequests);
-        priorityFilter.setFont(AppTheme.regular(12));
-        priorityFilter.setPreferredSize(new java.awt.Dimension(165, 40));
-        priorityFilter.setToolTipText("Filter by borrower type");
-        priorityFilter.addActionListener(event -> showRequests());
-        statusFilter.setFont(AppTheme.regular(12));
-        statusFilter.setPreferredSize(new java.awt.Dimension(160, 40));
-        statusFilter.setToolTipText("Filter by request status");
-        statusFilter.addActionListener(event -> showRequests());
-        tools.add(statusFilter);
-        tools.add(priorityFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
-        refresh.addActionListener(event -> loadRequests());
+        refresh.addActionListener(event -> loadRequests(false));
         tools.add(refresh);
         filters.add(tools, BorderLayout.EAST);
+
+        JPanel statusRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        statusRow.setOpaque(false);
+        styleCombo(statusFilter, 200, "Filter by overall request status");
+        statusRow.add(statusFilter);
+        if (scopeRole == null) {
+            styleCombo(departmentFilter, 165, "Filter by department");
+            styleCombo(decisionFilter, 225, "Filter by the department's own decision");
+            statusRow.add(departmentFilter);
+            statusRow.add(decisionFilter);
+        }
+        styleCombo(priorityFilter, 165, "Filter by borrower type");
+        statusRow.add(priorityFilter);
+        resultCount.setFont(AppTheme.semibold(11));
+        resultCount.setForeground(AppTheme.primary());
+        statusRow.add(resultCount);
+        JPanel filterBlock = new JPanel(new BorderLayout(0, 8));
+        filterBlock.setOpaque(false);
+        filterBlock.add(filters, BorderLayout.NORTH);
+        filterBlock.add(statusRow, BorderLayout.CENTER);
+        filters = filterBlock;
         header.add(filters, BorderLayout.CENTER);
         header.setAlignmentX(LEFT_ALIGNMENT);
         add(header);
         add(Box.createVerticalStrut(14));
     }
 
+    private void styleCombo(javax.swing.JComboBox<?> combo, int width, String tooltip) {
+        combo.setFont(AppTheme.regular(12));
+        combo.setPreferredSize(new java.awt.Dimension(width, 40));
+        combo.setToolTipText(tooltip);
+        combo.addActionListener(event -> showRequests());
+    }
+
+    @Override
+    public void reloadData() {
+        loadRequests(true);
+    }
+
     private void loadRequests() {
-        showMessage("Loading requests…", false);
+        loadRequests(false);
+    }
+
+    private void loadRequests(boolean quiet) {
+        if (loading) {
+            return;
+        }
+        loading = true;
+        if (!quiet) {
+            showMessage("Loading requests…", false);
+        }
         new SwingWorker<List<BorrowRequest>, Void>() {
             @Override
             protected List<BorrowRequest> doInBackground() throws Exception {
@@ -141,6 +197,7 @@ public class RequestQueuePanel extends JPanel {
 
             @Override
             protected void done() {
+                loading = false;
                 try {
                     requests = get();
                     showRequests();
@@ -156,9 +213,10 @@ public class RequestQueuePanel extends JPanel {
         String query = search.getText().trim().toLowerCase();
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
-            if (dateFilter.matches(request.getEventDate())
+            if (matchesDate(request)
                     && matchesPriority(request)
                     && matchesStatus(request)
+                    && matchesDepartment(request)
                     && searchableText(request).contains(query)) {
                 filtered.add(request);
             }
@@ -170,6 +228,7 @@ public class RequestQueuePanel extends JPanel {
         // Work queues serve faculty requests first; record views keep plain date order.
         filtered.sort(isWorkQueue() ? BorrowRequest.PRIORITY_FIRST.thenComparing(byDate) : byDate);
 
+        resultCount.setText(filtered.size() + " of " + requests.size() + " shown");
         if (filtered.isEmpty()) {
             requestList.add(message(
                     requests.isEmpty()
@@ -198,19 +257,61 @@ public class RequestQueuePanel extends JPanel {
     }
 
     private boolean matchesStatus(BorrowRequest request) {
-        switch (statusFilter.getSelectedIndex()) {
-            case 1:
-                return "APPROVED".equals(request.getStatus());
-            case 2:
-                return "REJECTED".equals(request.getStatus());
-            case 3:
-                return "PENDING_STAFF".equals(request.getStatus())
-                        || "NEEDS_ACTION".equals(request.getStatus());
-            case 4:
-                return "PENDING_ADMIN".equals(request.getStatus());
-            default:
-                return true;
+        RequestStatus.Category category =
+                (RequestStatus.Category) statusFilter.getSelectedItem();
+        return category == null || category.matches(request, scopeRole);
+    }
+
+    /** Matches the request when any schedule falls inside the selected date range. */
+    private boolean matchesDate(BorrowRequest request) {
+        if (dateFilter.matches(request.getEventDate())) {
+            return true;
         }
+        for (src.model.RequestOccurrence occurrence : request.getOccurrences()) {
+            if (dateFilter.matches(occurrence.getEventDate())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Department + department-decision filters (admin and director views). */
+    private boolean matchesDepartment(BorrowRequest request) {
+        if (scopeRole != null) {
+            return request.involvesDepartment(scopeRole);
+        }
+        int department = departmentFilter.getSelectedIndex();
+        int decision = decisionFilter.getSelectedIndex();
+        if (department <= 0 && decision <= 0) {
+            return true;
+        }
+        String[] roles = department == 1 ? new String[] { RequestStatus.ICT }
+                : department == 2 ? new String[] { RequestStatus.FACILITY }
+                        : new String[] { RequestStatus.ICT, RequestStatus.FACILITY };
+        for (String role : roles) {
+            String status = RequestStatus.department(request, role);
+            if (status != null && (decision <= 0 || decisionMatches(status, decision))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean decisionMatches(String status, int decision) {
+        switch (decision) {
+            case 1: return "PENDING".equals(status) || "UNABLE".equals(status);
+            case 2: return "ASSIGNED".equals(status);
+            case 3: return "DECLINED".equals(status);
+            case 4: return "RELEASED".equals(status);
+            case 5: return "RETURNED".equals(status);
+            case 6: return RequestStatus.NOT_ASSIGNED.equals(status);
+            default: return true;
+        }
+    }
+
+    private static boolean isStaffActor(User user) {
+        return user != null && ("ICT_STAFF".equalsIgnoreCase(user.getRole())
+                || "FACILITY_STAFF".equalsIgnoreCase(user.getRole()));
     }
 
     private boolean isWorkQueue() {
@@ -225,6 +326,7 @@ public class RequestQueuePanel extends JPanel {
                 .append(request.getVenue()).append(' ')
                 .append(request.getPurpose()).append(' ')
                 .append(request.getStatus()).append(' ')
+                .append(UiSupport.displayStatus(request.getOverallStatus(scopeRole))).append(' ')
                 .append(request.isPriority() ? "faculty priority" : "student");
         for (EquipmentRequestItem item : request.getEquipmentItems()) {
             text.append(' ').append(item.getEquipmentName())
@@ -272,24 +374,16 @@ public class RequestQueuePanel extends JPanel {
                 + request.getBorrowerName());
         code.setFont(AppTheme.semibold(13));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
         title.add(code, BorderLayout.CENTER);
-        if (request.isPriority()) {
-            JPanel badges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-            badges.setOpaque(false);
-            badges.add(new src.ui.components.StatusBadge(
-                    "Faculty · Priority", AppTheme.isDarkMode()
-                            ? new java.awt.Color(196, 181, 253) : new java.awt.Color(124, 58, 237)));
-            badges.add(status);
-            title.add(badges, BorderLayout.EAST);
-        } else {
-            title.add(status, BorderLayout.EAST);
-        }
+        title.add(UiSupport.statusBadges(request, scopeRole, scopeRole == null),
+                BorderLayout.EAST);
 
         String equipment = equipmentSummary(request);
+        int schedules = request.getOccurrences().size();
         JLabel meta = new JLabel(request.getVenue() + "  ·  "
                 + request.getEventDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
-                + "  ·  " + request.getStartTime() + "–" + request.getEndTime());
+                + "  ·  " + UiSupport.timeRange(request.getStartTime(), request.getEndTime())
+                + (schedules > 1 ? "  ·  " + schedules + " schedules" : ""));
         meta.setFont(AppTheme.regular(10));
         meta.setForeground(AppTheme.muted());
         JLabel itemLine = new JLabel(equipment);
@@ -300,13 +394,22 @@ public class RequestQueuePanel extends JPanel {
         details.add(meta);
         details.add(Box.createVerticalStrut(4));
         details.add(itemLine);
+        String remarks = departmentRemarks(request);
+        if (!remarks.isEmpty()) {
+            JLabel remarksLine = new JLabel("<html>" + remarks + "</html>");
+            remarksLine.setFont(AppTheme.regular(10));
+            remarksLine.setForeground(AppTheme.muted());
+            details.add(Box.createVerticalStrut(4));
+            details.add(remarksLine);
+        }
         card.add(details, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0));
         actions.setOpaque(false);
         PrimaryButton view = new PrimaryButton("View details", PrimaryButton.Style.SECONDARY);
         view.addActionListener(event -> new RequestDetailsDialog(
-                javax.swing.SwingUtilities.getWindowAncestor(this), request).setVisible(true));
+                javax.swing.SwingUtilities.getWindowAncestor(this), request, scopeRole)
+                .setVisible(true));
         actions.add(view);
         addModeActions(actions, request);
         card.add(actions, BorderLayout.SOUTH);
@@ -315,36 +418,101 @@ public class RequestQueuePanel extends JPanel {
 
     private void addModeActions(JPanel actions, BorrowRequest request) {
         if (mode == Mode.STAFF_QUEUE) {
-            PrimaryButton assign = new PrimaryButton("Assign equipment");
-            assign.addActionListener(event -> assignRequest(request));
+            if (!hasOwnGroup(request, "PENDING")) {
+                return;
+            }
+            PrimaryButton approve = new PrimaryButton("Approve");
+            approve.setToolTipText("Approve and assign your department's equipment");
+            approve.addActionListener(event -> assignRequest(request));
+            PrimaryButton decline = new PrimaryButton("Decline", PrimaryButton.Style.DANGER);
+            decline.setToolTipText("Decline only your department's equipment");
+            decline.addActionListener(event -> declineRequest(request));
             PrimaryButton needsAction = new PrimaryButton(
                     "Request changes", PrimaryButton.Style.SECONDARY);
             needsAction.addActionListener(event -> requestChanges(request));
-            actions.add(assign);
+            actions.add(approve);
+            actions.add(decline);
             actions.add(needsAction);
         } else if (mode == Mode.ADMIN_REVIEW || mode == Mode.DIRECTOR_REVIEW) {
             PrimaryButton approve = new PrimaryButton("Approve");
             approve.addActionListener(event -> reviewRequest(request, true));
-            PrimaryButton reject = new PrimaryButton("Reject", PrimaryButton.Style.DANGER);
+            PrimaryButton reject = new PrimaryButton("Decline", PrimaryButton.Style.DANGER);
             reject.addActionListener(event -> reviewRequest(request, false));
             actions.add(approve);
             actions.add(reject);
         } else if (mode == Mode.SCHEDULE_ASSIGNMENT) {
-            boolean hasAssigned = request.getEquipmentItems().stream()
-                    .anyMatch(item -> isActorItem(item, "ASSIGNED"));
-            boolean hasReleased = request.getEquipmentItems().stream()
-                    .anyMatch(item -> isActorItem(item, "RELEASED"));
-            if (hasAssigned) {
-                PrimaryButton release = new PrimaryButton("Confirm release");
+            // Each department checks only its own records, so the other department's
+            // decline or earlier release never hides these buttons.
+            boolean finalApproved = "APPROVED".equals(request.getStatus())
+                    || "RELEASED".equals(request.getStatus());
+            if (finalApproved && hasOwnGroup(request, "ASSIGNED")) {
+                PrimaryButton release = new PrimaryButton(
+                        RequestStatus.departmentLabel(actor.getRole()) + " release");
                 release.addActionListener(event -> updateTransaction(request, true));
                 actions.add(release);
-            } else if (hasReleased) {
+            }
+            if (hasOwnGroup(request, "RELEASED")) {
                 PrimaryButton returned = new PrimaryButton(
                         "Inspect return", PrimaryButton.Style.SECONDARY);
                 returned.addActionListener(event -> updateTransaction(request, false));
                 actions.add(returned);
             }
         }
+    }
+
+    private boolean hasOwnGroup(BorrowRequest request, String status) {
+        for (DepartmentStatus department : request.getDepartments()) {
+            if (actor.getRole().equalsIgnoreCase(department.getCustodianRole())
+                    && status.equals(department.getStatus())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Department remarks (e.g. decline reasons) visible to this view. */
+    private String departmentRemarks(BorrowRequest request) {
+        StringBuilder text = new StringBuilder();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (DepartmentStatus department : request.getDepartments()) {
+            if (scopeRole != null && !scopeRole.equalsIgnoreCase(department.getCustodianRole())) {
+                continue;
+            }
+            String remarks = department.getRemarks();
+            if (remarks == null || remarks.isBlank()
+                    || !seen.add(department.getCustodianRole() + remarks)) {
+                continue;
+            }
+            if (text.length() > 0) {
+                text.append("<br>");
+            }
+            text.append("<b>").append(RequestStatus.departmentLabel(department.getCustodianRole()))
+                    .append(' ').append(UiSupport.departmentStatus(department.getStatus()).toLowerCase())
+                    .append(":</b> ").append(escape(remarks));
+        }
+        return text.toString();
+    }
+
+    private static String escape(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private void declineRequest(BorrowRequest request) {
+        String remarks = JOptionPane.showInputDialog(
+                this, "Reason for declining your department's equipment:",
+                "Decline " + RequestStatus.departmentLabel(actor.getRole()) + " equipment",
+                JOptionPane.WARNING_MESSAGE);
+        if (remarks == null) {
+            return;
+        }
+        if (remarks.isBlank()) {
+            JOptionPane.showMessageDialog(
+                    this, "Enter a reason for declining.",
+                    "Reason required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        runAction("Unable to decline request", () ->
+                requestController.declineStaffRequest(actor, request.getRequestId(), remarks));
     }
 
     private void assignRequest(BorrowRequest request) {
@@ -379,16 +547,16 @@ public class RequestQueuePanel extends JPanel {
     private void reviewRequest(BorrowRequest request, boolean approve) {
         String prompt = approve
                 ? "Optional remarks:"
-                : "Reason for rejecting this request:";
+                : "Reason for declining this request:";
         String remarks = JOptionPane.showInputDialog(
-                this, prompt, approve ? "Approve request" : "Reject request",
+                this, prompt, approve ? "Approve request" : "Decline request",
                 JOptionPane.QUESTION_MESSAGE);
         if (remarks == null) {
             return;
         }
         if (!approve && remarks.isBlank()) {
             JOptionPane.showMessageDialog(
-                    this, "Enter a reason before rejecting.",
+                    this, "Enter a reason before declining.",
                     "Reason required", JOptionPane.WARNING_MESSAGE);
             return;
         }
@@ -510,18 +678,20 @@ public class RequestQueuePanel extends JPanel {
     private String subtitleForMode() {
         switch (mode) {
             case STAFF_QUEUE:
-                return "New requests for your equipment group. Assign available quantities or request changes.";
+                return "Requests with your department's equipment. Approve or decline independently of other departments.";
             case ADMIN_REVIEW:
                 return "Review staff-assigned requests before they go to the campus director.";
             case DIRECTOR_REVIEW:
                 return "Final approval for requests ready for campus director review.";
             case SCHEDULE_ASSIGNMENT:
-                return "Release approved equipment and inspect returns. Finished items move to Transaction history.";
+                return "Release your department's approved equipment and inspect returns, independently of other departments.";
             case TRANSACTION_HISTORY:
-                return "Returned equipment and closed requests for your equipment group.";
+                return "Returned, declined, and closed requests for your department.";
             case ALL_REQUESTS:
             default:
-                return "Search and review request records across all statuses.";
+                return scopeRole == null
+                        ? "Monitor every request and each department's decision."
+                        : "Every request containing your department's equipment.";
         }
     }
 

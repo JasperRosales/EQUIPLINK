@@ -59,8 +59,8 @@ public class EquipmentRequestPanel extends JPanel {
             new SpinnerNumberModel(1, 1, Integer.MAX_VALUE, 1));
     private final JTextField venue = new JTextField();
     private final JTextField eventDate = new JTextField();
-    private final JTextField startTime = new JTextField();
-    private final JTextField endTime = new JTextField();
+    private final src.ui.components.TimeInput startTime = new src.ui.components.TimeInput();
+    private final src.ui.components.TimeInput endTime = new src.ui.components.TimeInput();
     private final JTextField participants = new JTextField();
     private final JTextField personInCharge = new JTextField();
     private final JTextField position = new JTextField();
@@ -203,8 +203,8 @@ public class EquipmentRequestPanel extends JPanel {
         int row = 1;
         addFormField(eventCard, "Venue", venue, row, 0);
         addFormField(eventCard, "Event date (YYYY-MM-DD)", eventDate, row++, 1);
-        addFormField(eventCard, "Start time (hh:mm AM/PM)", startTime, row, 0);
-        addFormField(eventCard, "End time (hh:mm AM/PM)", endTime, row++, 1);
+        addFormField(eventCard, "Start time (hh:mm + AM/PM)", startTime, row, 0);
+        addFormField(eventCard, "End time (hh:mm + AM/PM)", endTime, row++, 1);
         addFormField(eventCard, "Participants", participants, row, 0);
         addFormField(eventCard, "Person in charge", personInCharge, row++, 1);
         addFormField(eventCard, "Position", position, row, 0);
@@ -430,8 +430,8 @@ public class EquipmentRequestPanel extends JPanel {
             }
         };
         eventDate.getDocument().addDocumentListener(listener);
-        startTime.getDocument().addDocumentListener(listener);
-        endTime.getDocument().addDocumentListener(listener);
+        startTime.addDocumentListener(listener);
+        endTime.addDocumentListener(listener);
         availabilityTimer = new Timer(650, event -> loadEquipment());
         availabilityTimer.setRepeats(false);
     }
@@ -600,7 +600,7 @@ public class EquipmentRequestPanel extends JPanel {
                     selectedItems,
                     occs);
         } catch (DateTimeParseException exception) {
-            showMessage("Use YYYY-MM-DD for date and hh:mm AM/PM for times (e.g. 09:00 AM).",
+            showMessage("Use YYYY-MM-DD for the date, hh:mm for times (e.g. 09:00), and pick AM or PM.",
                     "Check date and time");
             return;
         } catch (IllegalArgumentException exception) {

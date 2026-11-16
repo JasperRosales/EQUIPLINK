@@ -171,8 +171,10 @@ public class EquipmentService {
                 FROM request_items ri
                 JOIN request_groups rg ON rg.group_id = ri.group_id
                 JOIN borrow_requests br ON br.request_id = ri.request_id
+                LEFT JOIN request_occurrences ro ON ro.occurrence_id = rg.occurrence_id
                 WHERE rg.custodian_role = ? AND rg.status = 'ASSIGNED'
-                  AND br.status = 'APPROVED' AND br.event_date = CURRENT_DATE
+                  AND br.status IN ('APPROVED', 'RELEASED')
+                  AND COALESCE(ro.event_date, br.event_date) = CURRENT_DATE
                 """);
     }
 
@@ -182,8 +184,9 @@ public class EquipmentService {
                 FROM request_items ri
                 JOIN request_groups rg ON rg.group_id = ri.group_id
                 JOIN borrow_requests br ON br.request_id = ri.request_id
+                LEFT JOIN request_occurrences ro ON ro.occurrence_id = rg.occurrence_id
                 WHERE rg.custodian_role = ? AND rg.status = 'RELEASED'
-                  AND br.status = 'RELEASED' AND br.event_date = CURRENT_DATE
+                  AND COALESCE(ro.event_date, br.event_date) = CURRENT_DATE
                 """);
     }
 

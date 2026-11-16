@@ -1,6 +1,8 @@
 package src.ui;
 
 import src.model.BorrowRequest;
+import src.model.RequestStatus;
+import src.model.RequestStatus.Category;
 import src.model.User;
 import src.controller.BorrowRequestController;
 import src.controller.EquipmentController;
@@ -24,7 +26,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class DashboardPanel extends JPanel {
+public class DashboardPanel extends JPanel implements Refreshable {
 
     private static final Color GREEN = AppTheme.success();
     private static final Color PURPLE = AppTheme.accent();
@@ -35,7 +37,7 @@ public class DashboardPanel extends JPanel {
     private final EquipmentController equipmentController;
     private final Consumer<String> openPage;
     private final JPanel requestList = new JPanel();
-    private final DashboardCard[] statCards = new DashboardCard[4];
+    private final DashboardCard[] statCards = new DashboardCard[8];
 
     public DashboardPanel(
             User user,
@@ -97,21 +99,8 @@ public class DashboardPanel extends JPanel {
     }
 
     private void addStatCards() {
-        int cardCount = isStaff() ? 4 : 3;
-        JPanel cards = new JPanel(new GridLayout(1, cardCount, 14, 0));
-        cards.setOpaque(false);
-        cards.setMaximumSize(new Dimension(Integer.MAX_VALUE, 132));
-        if (isBorrower()) {
-            statCards[0] = new DashboardCard("My requests", "—",
-                    "Active requests", AppTheme.primary());
-            statCards[1] = new DashboardCard("Pending", "—",
-                    "Awaiting review", ORANGE);
-            statCards[2] = new DashboardCard("Borrowed", "—",
-                    "Currently released", GREEN);
-            statCards[0].setClickAction(() -> openPage.accept("My Requests"));
-            statCards[1].setClickAction(() -> openPage.accept("Pending Requests"));
-            statCards[2].setClickAction(() -> openPage.accept("Borrowed Requests"));
-        } else if (isStaff()) {
+        String all = isBorrower() ? "My Requests::" : "All Requests::";
+        if (isStaff()) {
             statCards[0] = new DashboardCard("Total equipment", "—",
                     "In your inventory", AppTheme.primary());
             statCards[1] = new DashboardCard("Available", "—",
@@ -124,28 +113,63 @@ public class DashboardPanel extends JPanel {
             statCards[1].setClickAction(() -> openPage.accept("Inventory"));
             statCards[2].setClickAction(() -> openPage.accept("Schedule & Assignment"));
             statCards[3].setClickAction(() -> openPage.accept("Schedule & Assignment"));
-        } else if (isDirector()) {
-            statCards[0] = new DashboardCard("Pending review", "—",
-                    "Awaiting your decision", ORANGE);
-            statCards[1] = new DashboardCard("Approved requests", "—",
-                    "Final approval granted", GREEN);
-            statCards[2] = new DashboardCard("Rejected requests", "—",
-                    "Closed after review", AppTheme.danger());
-            statCards[0].setClickAction(() -> openPage.accept("Request Approval"));
-            statCards[1].setClickAction(() -> openPage.accept("All Requests"));
-            statCards[2].setClickAction(() -> openPage.accept("All Requests"));
-        } else {
-            statCards[0] = new DashboardCard("Pending review", "—",
-                    "Staff-assigned requests", AppTheme.primary());
-            statCards[1] = new DashboardCard("Approved requests", "—",
-                    "Final approval granted", GREEN);
-            statCards[2] = new DashboardCard("Rejected requests", "—",
-                    "Closed after review", ORANGE);
-            statCards[0].setClickAction(() -> openPage.accept("Borrowing Requests"));
-            statCards[1].setClickAction(() -> openPage.accept("All Requests"));
-            statCards[2].setClickAction(() -> openPage.accept("All Requests"));
+            addCardRow(0, 4);
+            add(Box.createVerticalStrut(14));
+            String department = RequestStatus.departmentLabel(user.getRole());
+            statCards[4] = new DashboardCard("Awaiting decision", "—",
+                    department + " equipment pending", ORANGE);
+            statCards[5] = new DashboardCard("Approved", "—",
+                    "Approved by " + department, GREEN);
+            statCards[6] = new DashboardCard("Declined", "—",
+                    "Declined requests", AppTheme.danger());
+            statCards[7] = new DashboardCard("Overdue", "—",
+                    "Not processed on time", AppTheme.danger());
+            statCards[4].setClickAction(() -> openPage.accept(all + Category.PENDING.getLabel()));
+            statCards[5].setClickAction(() -> openPage.accept(all + Category.APPROVED.getLabel()));
+            statCards[6].setClickAction(() -> openPage.accept(all + Category.DECLINED.getLabel()));
+            statCards[7].setClickAction(() -> openPage.accept(all + Category.OVERDUE.getLabel()));
+            addCardRow(4, 4);
+            return;
         }
-        for (int i = 0; i < cardCount; i++) {
+        if (isBorrower()) {
+            statCards[0] = new DashboardCard("My requests", "—",
+                    "Active requests", AppTheme.primary());
+            statCards[1] = new DashboardCard("Pending", "—",
+                    "Awaiting department review", ORANGE);
+            statCards[2] = new DashboardCard("Approved", "—",
+                    "Partially or fully approved", GREEN);
+            statCards[3] = new DashboardCard("Released", "—",
+                    "Equipment released to you", PURPLE);
+            statCards[0].setClickAction(() -> openPage.accept("My Requests"));
+            statCards[1].setClickAction(() -> openPage.accept(all + Category.PENDING.getLabel()));
+            statCards[2].setClickAction(() -> openPage.accept(all + Category.APPROVED.getLabel()));
+            statCards[3].setClickAction(() -> openPage.accept("Borrowed Requests"));
+        } else {
+            boolean director = isDirector();
+            statCards[0] = new DashboardCard("Pending review", "—",
+                    director ? "Awaiting your decision" : "Department-processed requests",
+                    director ? ORANGE : AppTheme.primary());
+            statCards[1] = new DashboardCard("Approved requests", "—",
+                    "Final approval granted", GREEN);
+            statCards[2] = new DashboardCard("Declined requests", "—",
+                    "Closed after review", AppTheme.danger());
+            statCards[3] = new DashboardCard("Overdue", "—",
+                    "Not processed on time", ORANGE);
+            statCards[0].setClickAction(() -> openPage.accept(
+                    director ? "Request Approval" : "Borrowing Requests"));
+            statCards[1].setClickAction(() -> openPage.accept(all + Category.FINAL_APPROVED.getLabel()));
+            statCards[2].setClickAction(() -> openPage.accept(all + Category.DECLINED.getLabel()));
+            statCards[3].setClickAction(() -> openPage.accept(all + Category.OVERDUE.getLabel()));
+        }
+        addCardRow(0, 4);
+    }
+
+    private void addCardRow(int from, int count) {
+        JPanel cards = new JPanel(new GridLayout(1, count, 14, 0));
+        cards.setOpaque(false);
+        cards.setMaximumSize(new Dimension(Integer.MAX_VALUE, 132));
+        cards.setAlignmentX(LEFT_ALIGNMENT);
+        for (int i = from; i < from + count; i++) {
             cards.add(statCards[i]);
         }
         add(cards);
@@ -236,36 +260,56 @@ public class DashboardPanel extends JPanel {
         loadRequestPreview();
     }
 
+    @Override
+    public void reloadData() {
+        loadDashboardData();
+    }
+
+    /**
+     * Request counters are computed from the same request list and status categories
+     * the filtered pages use, so a counter always equals the list it opens.
+     */
     private void loadDashboardCounts() {
         new SwingWorker<int[], Void>() {
             @Override
             protected int[] doInBackground() throws Exception {
+                List<BorrowRequest> requests = requestController.findVisibleRequests(user);
                 if (isBorrower()) {
+                    int active = 0;
+                    for (BorrowRequest request : requests) {
+                        String status = request.getStatus();
+                        if (!"COMPLETED".equals(status) && !"REJECTED".equals(status)
+                                && !"CANCELLED".equals(status)) {
+                            active++;
+                        }
+                    }
                     return new int[] {
-                            requestController.countActiveForBorrower(user.getUserId()),
-                            requestController.countPendingForBorrower(user.getUserId()),
-                            requestController.countBorrowedForBorrower(user.getUserId())
+                            active,
+                            count(Category.PENDING, requests, null),
+                            count(Category.APPROVED, requests, null),
+                            count(Category.PARTIALLY_RELEASED, requests, null)
+                                    + count(Category.FULLY_RELEASED, requests, null)
                     };
                 }
                 if (isStaff()) {
+                    String role = user.getRole().toUpperCase();
                     return new int[] {
                             equipmentController.countTotalUnitsForRole(user.getRole()),
                             equipmentController.countAvailableUnitsForRole(user.getRole()),
                             equipmentController.countReservedUnitsToday(user.getRole()),
-                            equipmentController.countInUseUnitsToday(user.getRole())
-                    };
-                }
-                if (isDirector()) {
-                    return new int[] {
-                            requestController.countByStatus("PENDING_DIRECTOR"),
-                            requestController.countByStatus("APPROVED"),
-                            requestController.countByStatus("REJECTED")
+                            equipmentController.countInUseUnitsToday(user.getRole()),
+                            count(Category.PENDING, requests, role),
+                            count(Category.APPROVED, requests, role),
+                            count(Category.DECLINED, requests, role),
+                            count(Category.OVERDUE, requests, role)
                     };
                 }
                 return new int[] {
-                        requestController.countByStatus("PENDING_ADMIN"),
-                        requestController.countByStatus("APPROVED"),
-                        requestController.countByStatus("REJECTED")
+                        count(isDirector() ? Category.DIRECTOR_REVIEW : Category.ADMIN_REVIEW,
+                                requests, null),
+                        count(Category.FINAL_APPROVED, requests, null),
+                        count(Category.DECLINED, requests, null),
+                        count(Category.OVERDUE, requests, null)
                 };
             }
 
@@ -284,6 +328,10 @@ public class DashboardPanel extends JPanel {
                 }
             }
         }.execute();
+    }
+
+    private static int count(Category category, List<BorrowRequest> requests, String scope) {
+        return (int) category.count(requests, scope);
     }
 
     private void loadRequestPreview() {
@@ -349,7 +397,8 @@ public class DashboardPanel extends JPanel {
                 details.setForeground(AppTheme.muted());
                 row.add(heading, BorderLayout.NORTH);
                 row.add(details, BorderLayout.CENTER);
-                JLabel status = new src.ui.components.StatusBadge(record.getStatus());
+                JLabel status = new src.ui.components.StatusBadge(
+                        record.getOverallStatus(isStaff() ? user.getRole().toUpperCase() : null));
                 row.add(status, BorderLayout.EAST);
                 requestList.add(row);
             }
