@@ -3,9 +3,11 @@ package src.service;
 import src.database.Database;
 import src.model.BorrowRequest;
 import src.model.BorrowRequestForm;
+import src.model.DepartmentStatus;
 import src.model.EquipmentRequestItem;
 import src.model.ItemInspection;
 import src.model.RequestOccurrence;
+import src.model.RequestStatus;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -74,7 +76,12 @@ public class BorrowRequestService {
                         priority ? "Priority: new faculty request" : "New equipment request",
                         priority
                                 ? "A faculty borrowing request is waiting for equipment processing. Faculty requests are handled first."
-                                : "A new borrowing request is waiting for equipment processing.");
+                                : "A new borrowing request is waiting for equipment processing.",
+                        "SUBMITTED");
+                notifyRole(connection, "ADMIN", requestId,
+                        priority ? "New faculty request submitted" : "New request submitted",
+                        "A borrower submitted a new equipment request. ICT and Facility staff will review their assigned equipment.",
+                        null, "SUBMITTED");
                 connection.commit();
                 return requestId;
             } catch (Exception exception) {
@@ -136,7 +143,8 @@ public class BorrowRequestService {
                         "Borrower updated request details.");
                 notifyGroupStaff(connection, requestId, "PENDING",
                         "Request updated by borrower",
-                        "A borrowing request was updated and needs equipment processing again.");
+                        "A borrowing request was updated and needs equipment processing again.",
+                        "BORROWER_EDITED");
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -292,13 +300,64 @@ public class BorrowRequestService {
         return requests;
     }
 
+    /**
+     * Every request visible to the role. Admin and director see all requests; ICT and
+     * facility staff only see requests containing equipment from their department.
+     */
+    public List<BorrowRequest> findAllRequests(String role) throws SQLException {
+        String normalizedRole = role == null ? "" : role.trim().toUpperCase();
+        if ("ICT_STAFF".equals(normalizedRole) || "FACILITY_STAFF".equals(normalizedRole)) {
+            return findRequests("""
+                    EXISTS (
+                        SELECT 1 FROM request_groups rg
+                        WHERE rg.request_id = br.request_id AND rg.custodian_role = ?
+                    )
+                    """, normalizedRole);
+        }
+        if ("ADMIN".equals(normalizedRole) || "DIRECTOR".equals(normalizedRole)) {
+            return findRequests("br.request_id > 0");
+        }
+        throw new SecurityException("Your account is not allowed to view all requests.");
+    }
+
     public List<BorrowRequest> findAllRequests() throws SQLException {
         return findRequests("br.request_id > 0");
     }
 
+    /** Every request the borrower submitted, in any status. */
+    public List<BorrowRequest> findAllForBorrower(long borrowerId) throws SQLException {
+        return findRequests("br.borrower_id = ?", borrowerId);
+    }
+
     /**
-     * Active hand-overs for the role: approved requests whose equipment is ready to
-     * release, and released equipment still waiting to be returned.
+     * Loads one request if the account may see it: borrowers their own, staff requests
+     * with their department's equipment, admin and director any request.
+     */
+    public BorrowRequest findRequestForUser(String role, long userId, long requestId)
+            throws SQLException {
+        String normalizedRole = role == null ? "" : role.trim().toUpperCase();
+        List<BorrowRequest> requests;
+        if ("BORROWER".equals(normalizedRole)) {
+            requests = findRequests("br.borrower_id = ? AND br.request_id = ?", userId, requestId);
+        } else if ("ICT_STAFF".equals(normalizedRole) || "FACILITY_STAFF".equals(normalizedRole)) {
+            requests = findRequests("""
+                    br.request_id = ? AND EXISTS (
+                        SELECT 1 FROM request_groups rg
+                        WHERE rg.request_id = br.request_id AND rg.custodian_role = ?
+                    )
+                    """, requestId, normalizedRole);
+        } else if ("ADMIN".equals(normalizedRole) || "DIRECTOR".equals(normalizedRole)) {
+            requests = findRequests("br.request_id = ?", requestId);
+        } else {
+            requests = List.of();
+        }
+        return requests.isEmpty() ? null : requests.get(0);
+    }
+
+    /**
+     * Active hand-overs for the role: department-approved equipment on requests with
+     * final approval (ready to release), and released equipment waiting to be returned.
+     * Each department is listed independently of the other department's progress.
      */
     public List<BorrowRequest> findScheduleForRole(String role) throws SQLException {
         String normalizedRole = requireCustodianRole(role);
@@ -309,7 +368,7 @@ public class BorrowRequestService {
                     WHERE rg.request_id = br.request_id
                       AND rg.custodian_role = ?
                       AND (
-                          (rg.status = 'ASSIGNED' AND br.status = 'APPROVED')
+                          (rg.status = 'ASSIGNED' AND br.status IN ('APPROVED', 'RELEASED'))
                           OR rg.status = 'RELEASED'
                       )
                 )
@@ -317,8 +376,8 @@ public class BorrowRequestService {
     }
 
     /**
-     * Finished transactions for the role: equipment that was returned, or assigned
-     * requests that were later rejected or cancelled.
+     * Finished work for the role: returned equipment, equipment the department
+     * declined, and approved equipment on requests later rejected or cancelled.
      */
     public List<BorrowRequest> findHistoryForRole(String role) throws SQLException {
         String normalizedRole = requireCustodianRole(role);
@@ -329,93 +388,39 @@ public class BorrowRequestService {
                     WHERE rg.request_id = br.request_id
                       AND rg.custodian_role = ?
                       AND (
-                          rg.status = 'RETURNED'
+                          rg.status IN ('RETURNED', 'DECLINED')
                           OR (br.status IN ('REJECTED', 'CANCELLED')
                               AND rg.assigned_by IS NOT NULL)
                       )
                 )
                 """, normalizedRole);
     }
-
     public void assignStaffRequest(String role, long actorId, long requestId)
             throws Exception {
         assignStaffRequest(role, actorId, requestId, null);
     }
 
     /**
-     * Assigns quantities for the actor's equipment group. A null list assigns the full
-     * requested quantities; otherwise each entry sets the quantity for one item, where
-     * 0 marks the item as unable to fulfill.
+     * Department approval: assigns quantities for the actor's own department only. A
+     * null list assigns the full requested quantities; otherwise each entry sets the
+     * quantity for one item, where 0 marks the item as unable to fulfill. The other
+     * department's records are never read for permission or modified.
      */
     public void assignStaffRequest(String role, long actorId, long requestId,
             List<ItemInspection> assignments) throws Exception {
         String normalizedRole = requireCustodianRole(role);
+        String department = RequestStatus.departmentLabel(normalizedRole);
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                LocalDate eventDate;
-                java.time.LocalTime startTime;
-                java.time.LocalTime endTime;
-                String previousStatus;
-                long groupId;
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT br.status, br.event_date, br.start_time, br.end_time,
-                               rg.group_id, rg.status AS group_status
-                        FROM borrow_requests br
-                        JOIN request_groups rg ON rg.request_id = br.request_id
-                        WHERE br.request_id = ? AND rg.custodian_role = ?
-                        FOR UPDATE OF br, rg
-                        """)) {
-                    statement.setLong(1, requestId);
-                    statement.setString(2, normalizedRole);
-                    try (ResultSet result = statement.executeQuery()) {
-                        if (!result.next()) {
-                            throw new IllegalArgumentException("Request was not found.");
-                        }
-                        previousStatus = result.getString("status");
-                        if (!"PENDING_STAFF".equals(previousStatus)
-                                && !"NEEDS_ACTION".equals(previousStatus)) {
-                            throw new IllegalArgumentException(
-                                    "This request is no longer waiting for staff review.");
-                        }
-                        if (!"PENDING".equals(result.getString("group_status"))) {
-                            throw new IllegalArgumentException(
-                                    "This equipment group was already processed.");
-                        }
-                        groupId = result.getLong("group_id");
-                        eventDate = result.getDate("event_date").toLocalDate();
-                        startTime = result.getTime("start_time").toLocalTime();
-                        endTime = result.getTime("end_time").toLocalTime();
-                    }
-                }
+                String previousStatus = lockRequestStatus(connection, requestId);
+                requireStaffReview(previousStatus);
+                List<GroupRow> pending = pendingGroups(
+                        lockRoleGroups(connection, requestId, normalizedRole));
 
-                Map<Long, Integer> requested = new LinkedHashMap<>();
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT requested_equipment_id, requested_quantity
-                        FROM request_items
-                        WHERE group_id = ?
-                        FOR UPDATE
-                        """)) {
-                    statement.setLong(1, groupId);
-                    try (ResultSet result = statement.executeQuery()) {
-                        while (result.next()) {
-                            requested.put(result.getLong("requested_equipment_id"),
-                                    result.getInt("requested_quantity"));
-                        }
-                    }
-                }
-                if (requested.isEmpty()) {
-                    throw new IllegalArgumentException(
-                            "There are no equipment items to assign in this request.");
-                }
-
-                Map<Long, ItemInspection> inputs = new HashMap<>();
-                if (assignments != null) {
-                    for (ItemInspection input : assignments) {
-                        inputs.put(input.getEquipmentId(), input);
-                    }
-                }
+                Map<Long, ItemInspection> inputs = indexInspections(assignments);
                 int totalAssigned = 0;
+                int totalItems = 0;
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_items
                         SET assigned_equipment_id = requested_equipment_id,
@@ -424,88 +429,154 @@ public class BorrowRequestService {
                             staff_remarks = ?
                         WHERE group_id = ? AND requested_equipment_id = ?
                         """)) {
-                    for (Map.Entry<Long, Integer> item : requested.entrySet()) {
-                        ItemInspection input = inputs.get(item.getKey());
-                        int quantity = input == null ? item.getValue() : input.getQuantity();
-                        if (quantity < 0 || quantity > item.getValue()) {
-                            throw new IllegalArgumentException(
-                                    "Assigned quantity must be between 0 and the requested quantity.");
+                    for (GroupRow group : pending) {
+                        Map<Long, Integer> requested = lockGroupItems(connection, group.groupId);
+                        for (Map.Entry<Long, Integer> item : requested.entrySet()) {
+                            totalItems++;
+                            ItemInspection input = inputs.get(item.getKey());
+                            int quantity = input == null ? item.getValue() : input.getQuantity();
+                            if (quantity < 0 || quantity > item.getValue()) {
+                                throw new IllegalArgumentException(
+                                        "Assigned quantity must be between 0 and the requested quantity.");
+                            }
+                            int available = EquipmentService.findAvailableQuantity(
+                                    connection, item.getKey(), requestId,
+                                    group.eventDate, group.startTime, group.endTime);
+                            if (quantity > available) {
+                                throw new IllegalArgumentException(
+                                        "Only " + available
+                                                + " unit(s) are available for the schedule on "
+                                                + group.eventDate + ".");
+                            }
+                            String note = input == null ? null : blankToNull(input.getRemarks());
+                            statement.setInt(1, quantity);
+                            statement.setString(2, quantity == 0 ? "UNABLE_TO_FULFILL"
+                                    : quantity < item.getValue() ? "PARTIAL" : null);
+                            statement.setString(3, note);
+                            statement.setLong(4, group.groupId);
+                            statement.setLong(5, item.getKey());
+                            statement.addBatch();
+                            totalAssigned += quantity;
                         }
-                        int available = EquipmentService.findAvailableQuantity(
-                                connection, item.getKey(), requestId,
-                                eventDate, startTime, endTime);
-                        if (quantity > available) {
-                            throw new IllegalArgumentException(
-                                    "Only " + available
-                                            + " unit(s) are available for the selected schedule.");
-                        }
-                        String note = input == null || input.getRemarks() == null
-                                || input.getRemarks().isBlank()
-                                ? null : input.getRemarks().trim();
-                        statement.setInt(1, quantity);
-                        statement.setString(2, quantity == 0 ? "UNABLE_TO_FULFILL"
-                                : quantity < item.getValue() ? "PARTIAL" : null);
-                        statement.setString(3, note);
-                        statement.setLong(4, groupId);
-                        statement.setLong(5, item.getKey());
-                        statement.addBatch();
-                        totalAssigned += quantity;
+                    }
+                    if (totalItems == 0) {
+                        throw new IllegalArgumentException(
+                                "There are no equipment items to assign in this request.");
                     }
                     if (totalAssigned == 0) {
                         throw new IllegalArgumentException(
-                                "No equipment can be assigned. Use \"Request changes\" to notify the borrower instead.");
+                                "No equipment can be assigned. Use \"Decline\" or \"Request changes\" instead.");
                     }
                     statement.executeBatch();
                 }
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_groups
                         SET status = 'ASSIGNED', assigned_by = ?,
-                            assigned_at = CURRENT_TIMESTAMP, staff_remarks = NULL
-                        WHERE group_id = ? AND status = 'PENDING'
+                            assigned_at = CURRENT_TIMESTAMP, staff_remarks = NULL,
+                            declined_by = NULL, declined_at = NULL, overdue_notified = FALSE
+                        WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
                         """)) {
                     statement.setLong(1, actorId);
-                    statement.setLong(2, groupId);
-                    if (statement.executeUpdate() != 1) {
-                        throw new IllegalStateException(
-                                "Equipment assignment did not complete.");
+                    statement.setLong(2, requestId);
+                    statement.setString(3, normalizedRole);
+                    if (statement.executeUpdate() != pending.size()) {
+                        throw new IllegalStateException("Equipment assignment did not complete.");
                     }
                 }
 
-                boolean readyForAdmin;
+                String nextStatus = advanceAfterDepartmentDecision(
+                        connection, requestId, previousStatus);
+                recordHistory(connection, requestId, pending.get(0).groupId, actorId,
+                        "EQUIPMENT_ASSIGNED", previousStatus, nextStatus,
+                        department + " approved its equipment.");
+                notifyBorrower(connection, requestId,
+                        department + " equipment approved",
+                        department + " staff approved the " + department
+                                + " equipment in your request.",
+                        normalizedRole, "DEPARTMENT_APPROVED");
+                notifyRole(connection, "ADMIN", requestId,
+                        department + " approved equipment",
+                        department + " staff approved their assigned equipment for this request.",
+                        normalizedRole, "DEPARTMENT_APPROVED");
+                notifyDepartment(connection, normalizedRole, requestId, actorId,
+                        department + " equipment approved",
+                        "Your department approved its equipment for this request.",
+                        "DEPARTMENT_APPROVED");
+                notifyAfterDepartmentDecision(connection, requestId, previousStatus, nextStatus);
+                connection.commit();
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            }
+        }
+    }
+
+    /**
+     * Department decline: marks only the actor's department equipment as declined.
+     * The other department keeps processing; the request is declined overall only
+     * when every department declined.
+     */
+    public void declineStaffRequest(String role, long actorId, long requestId, String remarks)
+            throws Exception {
+        String normalizedRole = requireCustodianRole(role);
+        String department = RequestStatus.departmentLabel(normalizedRole);
+        if (remarks == null || remarks.isBlank()) {
+            throw new IllegalArgumentException("Enter a reason for declining.");
+        }
+        String reason = remarks.trim();
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                String previousStatus = lockRequestStatus(connection, requestId);
+                requireStaffReview(previousStatus);
+                List<GroupRow> pending = pendingGroups(
+                        lockRoleGroups(connection, requestId, normalizedRole));
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT NOT EXISTS (
-                            SELECT 1 FROM request_groups
-                            WHERE request_id = ?
-                              AND status NOT IN ('ASSIGNED', 'CANCELLED')
+                        UPDATE request_items
+                        SET assigned_equipment_id = NULL, assigned_quantity = 0,
+                            inspection_result = 'DECLINED'
+                        WHERE group_id IN (
+                            SELECT group_id FROM request_groups
+                            WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
                         )
                         """)) {
                     statement.setLong(1, requestId);
-                    try (ResultSet result = statement.executeQuery()) {
-                        result.next();
-                        readyForAdmin = result.getBoolean(1);
-                    }
+                    statement.setString(2, normalizedRole);
+                    statement.executeUpdate();
                 }
-                String nextStatus = readyForAdmin ? "PENDING_ADMIN" : previousStatus;
-                if (readyForAdmin) {
-                    try (PreparedStatement statement = connection.prepareStatement("""
-                            UPDATE borrow_requests
-                            SET status = 'PENDING_ADMIN', updated_at = CURRENT_TIMESTAMP
-                            WHERE request_id = ?
-                            """)) {
-                        statement.setLong(1, requestId);
-                        statement.executeUpdate();
-                    }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE request_groups
+                        SET status = 'DECLINED', declined_by = ?,
+                            declined_at = CURRENT_TIMESTAMP, staff_remarks = ?
+                        WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
+                        """)) {
+                    statement.setLong(1, actorId);
+                    statement.setString(2, reason);
+                    statement.setLong(3, requestId);
+                    statement.setString(4, normalizedRole);
+                    statement.executeUpdate();
                 }
-                recordHistory(connection, requestId, groupId, actorId,
-                        "EQUIPMENT_ASSIGNED", previousStatus, nextStatus, null);
-                if (readyForAdmin) {
-                    notifyBorrower(connection, requestId,
-                            "Request ready for approval",
-                            "Staff completed equipment assignment. Your request is waiting for administrative review.");
-                    notifyRole(connection, "ADMIN", requestId,
-                            "Request awaiting review",
-                            "A processed borrowing request is waiting for administrative review.");
-                }
+                String nextStatus = advanceAfterDepartmentDecision(
+                        connection, requestId, previousStatus);
+                recordHistory(connection, requestId, pending.get(0).groupId, actorId,
+                        "DEPARTMENT_DECLINED", previousStatus, nextStatus,
+                        department + " declined: " + reason);
+                notifyBorrower(connection, requestId,
+                        department + " equipment declined",
+                        department + " staff declined the " + department
+                                + " equipment in your request. Reason: " + reason
+                                + ("REJECTED".equals(nextStatus) ? ""
+                                        : " Equipment from other departments is still being processed."),
+                        normalizedRole, "DEPARTMENT_DECLINED");
+                notifyRole(connection, "ADMIN", requestId,
+                        department + " declined equipment",
+                        department + " staff declined their assigned equipment. Reason: " + reason,
+                        normalizedRole, "DEPARTMENT_DECLINED");
+                notifyDepartment(connection, normalizedRole, requestId, actorId,
+                        department + " equipment declined",
+                        "Your department declined its equipment for this request. Reason: " + reason,
+                        "DEPARTMENT_DECLINED");
+                notifyAfterDepartmentDecision(connection, requestId, previousStatus, nextStatus);
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -523,41 +594,24 @@ public class BorrowRequestService {
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                long groupId;
-                String previousStatus;
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT br.status, rg.group_id, rg.status AS group_status
-                        FROM borrow_requests br
-                        JOIN request_groups rg ON rg.request_id = br.request_id
-                        WHERE br.request_id = ? AND rg.custodian_role = ?
-                        FOR UPDATE OF br, rg
-                        """)) {
-                    statement.setLong(1, requestId);
-                    statement.setString(2, normalizedRole);
-                    try (ResultSet result = statement.executeQuery()) {
-                        if (!result.next()) {
-                            throw new IllegalArgumentException("Request was not found.");
-                        }
-                        previousStatus = result.getString("status");
-                        if (!"PENDING_STAFF".equals(previousStatus)
-                                && !"NEEDS_ACTION".equals(previousStatus)) {
-                            throw new IllegalArgumentException(
-                                    "This request is no longer waiting for staff review.");
-                        }
-                        if (!"PENDING".equals(result.getString("group_status"))) {
-                            throw new IllegalArgumentException(
-                                    "This equipment group was already processed.");
-                        }
-                        groupId = result.getLong("group_id");
-                    }
-                }
+                String previousStatus = lockRequestStatus(connection, requestId);
+                requireStaffReview(previousStatus);
+                List<GroupRow> pending = pendingGroups(
+                        lockRoleGroups(connection, requestId, normalizedRole));
+                // Departments whose approval is reset by the borrower's edit are told so.
+                notifyGroupStaff(connection, requestId, "ASSIGNED",
+                        "Request sent back to borrower",
+                        RequestStatus.departmentLabel(normalizedRole)
+                                + " staff requested changes from the borrower. Review the request again after it is resubmitted.",
+                        "NEEDS_ACTION");
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_groups
                         SET status = 'UNABLE', staff_remarks = ?
-                        WHERE group_id = ? AND status = 'PENDING'
+                        WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
                         """)) {
                     statement.setString(1, remarks.trim());
-                    statement.setLong(2, groupId);
+                    statement.setLong(2, requestId);
+                    statement.setString(3, normalizedRole);
                     statement.executeUpdate();
                 }
                 try (PreparedStatement statement = connection.prepareStatement("""
@@ -585,11 +639,11 @@ public class BorrowRequestService {
                     statement.setLong(2, requestId);
                     statement.executeUpdate();
                 }
-                recordHistory(connection, requestId, groupId, actorId,
+                recordHistory(connection, requestId, pending.get(0).groupId, actorId,
                         "STAFF_REQUESTED_CHANGES", previousStatus, "NEEDS_ACTION",
                         remarks.trim());
                 notifyBorrower(connection, requestId, "Request needs your attention",
-                        remarks.trim());
+                        remarks.trim(), normalizedRole, "NEEDS_ACTION");
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -618,42 +672,38 @@ public class BorrowRequestService {
         updateStaffTransaction(role, actorId, requestId, false, inspections);
     }
 
+    /**
+     * Releases or receives the actor's department equipment. Only the department's
+     * own approval is checked, so ICT and Facility release independently: one
+     * department's decline or release never blocks the other.
+     */
     private void updateStaffTransaction(
             String role, long actorId, long requestId, boolean release,
             List<ItemInspection> inspections) throws Exception {
         String normalizedRole = requireCustodianRole(role);
+        String department = RequestStatus.departmentLabel(normalizedRole);
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                long groupId;
-                String requestStatus;
-                String groupStatus;
-                String issues = null;
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT br.status, rg.group_id, rg.status AS group_status
-                        FROM borrow_requests br
-                        JOIN request_groups rg ON rg.request_id = br.request_id
-                        WHERE br.request_id = ? AND rg.custodian_role = ?
-                        FOR UPDATE OF br, rg
-                        """)) {
-                    statement.setLong(1, requestId);
-                    statement.setString(2, normalizedRole);
-                    try (ResultSet result = statement.executeQuery()) {
-                        if (!result.next()) {
-                            throw new IllegalArgumentException("Request was not found.");
-                        }
-                        requestStatus = result.getString("status");
-                        groupId = result.getLong("group_id");
-                        groupStatus = result.getString("group_status");
-                    }
+                String requestStatus = lockRequestStatus(connection, requestId);
+                List<GroupRow> groups = lockRoleGroups(connection, requestId, normalizedRole);
+                if (groups.isEmpty()) {
+                    throw new SecurityException(
+                            "This request has no equipment assigned to your department.");
                 }
-
+                boolean finalApproved = "APPROVED".equals(requestStatus)
+                        || "RELEASED".equals(requestStatus);
+                GroupRow target;
+                String issues = null;
                 if (release) {
-                    if (!"APPROVED".equals(requestStatus) || !"ASSIGNED".equals(groupStatus)) {
-                        throw new IllegalArgumentException(
-                                "Only approved equipment assignments can be released.");
+                    target = firstWithStatus(groups, "ASSIGNED");
+                    if (target == null) {
+                        throw new IllegalArgumentException(releaseBlockedReason(groups));
                     }
-                    recordReleaseConditions(connection, groupId, inspections);
+                    if (!finalApproved) {
+                        throw new IllegalArgumentException(stageBlockedReason(requestStatus));
+                    }
+                    recordReleaseConditions(connection, target.groupId, inspections);
                     try (PreparedStatement statement = connection.prepareStatement("""
                             UPDATE request_groups
                             SET status = 'RELEASED', released_by = ?,
@@ -661,21 +711,19 @@ public class BorrowRequestService {
                             WHERE group_id = ? AND status = 'ASSIGNED'
                             """)) {
                         statement.setLong(1, actorId);
-                        statement.setLong(2, groupId);
-                        statement.executeUpdate();
+                        statement.setLong(2, target.groupId);
+                        if (statement.executeUpdate() != 1) {
+                            throw new IllegalStateException("Equipment release did not complete.");
+                        }
                     }
                 } else {
-                    if (!"APPROVED".equals(requestStatus)
-                            && !"RELEASED".equals(requestStatus)) {
-                        throw new IllegalArgumentException(
-                                "Only released equipment can be marked as returned.");
-                    }
-                    if (!"RELEASED".equals(groupStatus)) {
+                    target = firstWithStatus(groups, "RELEASED");
+                    if (target == null || !finalApproved) {
                         throw new IllegalArgumentException(
                                 "Only released equipment can be marked as returned.");
                     }
                     issues = recordReturnInspection(
-                            connection, requestId, groupId, inspections);
+                            connection, requestId, target.groupId, inspections);
                     try (PreparedStatement statement = connection.prepareStatement("""
                             UPDATE request_groups
                             SET status = 'RETURNED', inspected_by = ?,
@@ -683,8 +731,10 @@ public class BorrowRequestService {
                             WHERE group_id = ? AND status = 'RELEASED'
                             """)) {
                         statement.setLong(1, actorId);
-                        statement.setLong(2, groupId);
-                        statement.executeUpdate();
+                        statement.setLong(2, target.groupId);
+                        if (statement.executeUpdate() != 1) {
+                            throw new IllegalStateException("Equipment return did not complete.");
+                        }
                     }
                 }
 
@@ -713,25 +763,47 @@ public class BorrowRequestService {
                         statement.setLong(2, requestId);
                         statement.executeUpdate();
                     }
+                } else {
+                    touchRequest(connection, requestId);
                 }
-                recordHistory(connection, requestId, groupId, actorId,
+                recordHistory(connection, requestId, target.groupId, actorId,
                         release ? "EQUIPMENT_RELEASED" : "EQUIPMENT_RETURNED",
-                        requestStatus, nextStatus, issues);
+                        requestStatus, nextStatus,
+                        issues == null ? department : department + ": " + issues);
+                String action = release ? "EQUIPMENT_RELEASED" : "EQUIPMENT_RETURNED";
                 if (issues != null) {
                     notifyRole(connection, "ADMIN", requestId,
                             "Damaged or missing equipment",
-                            "Return inspection found issues: " + issues);
+                            department + " return inspection found issues: " + issues,
+                            normalizedRole, action);
                 }
                 notifyBorrower(connection, requestId,
-                        release ? "Equipment released" : "Equipment returned",
+                        release ? department + " equipment released" : department + " equipment returned",
                         release
-                                ? "Your approved equipment has been released to you."
+                                ? "Your approved " + department + " equipment has been released to you."
                                 : issues == null
-                                        ? "Your returned equipment was inspected with no issues."
-                                        : "Your returned equipment was inspected. Issues found: " + issues);
+                                        ? "Your returned " + department + " equipment was inspected with no issues."
+                                        : "Your returned " + department + " equipment was inspected. Issues found: " + issues,
+                        normalizedRole, action);
+                notifyRole(connection, "ADMIN", requestId,
+                        release ? department + " released equipment" : department + " received returned equipment",
+                        release
+                                ? department + " staff released their equipment to the borrower."
+                                : department + " staff recorded the equipment return.",
+                        normalizedRole, action);
+                notifyDepartment(connection, normalizedRole, requestId, actorId,
+                        release ? department + " equipment released" : department + " equipment returned",
+                        release
+                                ? "Your department released its equipment for this request."
+                                : "Your department recorded the return of its equipment.",
+                        action);
                 if ("COMPLETED".equals(nextStatus)) {
                     notifyBorrower(connection, requestId, "Transaction completed",
-                            "All equipment has been returned and the request is completed.");
+                            "All equipment has been returned and the request is completed.",
+                            null, "COMPLETED");
+                    notifyRole(connection, "ADMIN", requestId, "Request completed",
+                            "All departments finished processing this request.",
+                            null, "COMPLETED");
                 }
                 connection.commit();
             } catch (Exception exception) {
@@ -751,22 +823,14 @@ public class BorrowRequestService {
                 : "REJECTED";
         String statusColumn = "ADMIN".equals(reviewerRole) ? "admin_status" : "director_status";
         String event = reviewerRole + (approve ? "_APPROVED" : "_REJECTED");
+        String reviewer = "ADMIN".equals(reviewerRole) ? "Administrator" : "Campus director";
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT status
-                        FROM borrow_requests
-                        WHERE request_id = ?
-                        FOR UPDATE
-                        """)) {
-                    statement.setLong(1, requestId);
-                    try (ResultSet result = statement.executeQuery()) {
-                        if (!result.next() || !currentStatus.equals(result.getString("status"))) {
-                            throw new IllegalArgumentException(
-                                    "This request is not waiting for your review.");
-                        }
-                    }
+                String status = lockRequestStatus(connection, requestId);
+                if (!currentStatus.equals(status)) {
+                    throw new IllegalArgumentException(
+                            "This request is not waiting for your review.");
                 }
                 if (!approve && (remarks == null || remarks.isBlank())) {
                     throw new IllegalArgumentException(
@@ -781,12 +845,16 @@ public class BorrowRequestService {
                 try (PreparedStatement statement = connection.prepareStatement(updateSql)) {
                     statement.setString(1, nextStatus);
                     statement.setString(2, approve ? "APPROVED" : "REJECTED");
-                    statement.setString(3, remarks == null || remarks.isBlank()
-                            ? null : remarks.trim());
+                    statement.setString(3, blankToNull(remarks));
                     statement.setLong(4, requestId);
                     statement.executeUpdate();
                 }
                 if (!approve) {
+                    notifyGroupStaff(connection, requestId, "ASSIGNED",
+                            "Request declined by " + reviewer.toLowerCase(),
+                            reviewer + " declined a request your department approved. Reason: "
+                                    + remarks.trim(),
+                            event);
                     try (PreparedStatement statement = connection.prepareStatement("""
                             UPDATE request_groups
                             SET status = 'CANCELLED'
@@ -798,29 +866,269 @@ public class BorrowRequestService {
                     }
                 }
                 recordHistory(connection, requestId, null, actorId,
-                        event, currentStatus, nextStatus,
-                        remarks == null || remarks.isBlank() ? null : remarks.trim());
+                        event, currentStatus, nextStatus, blankToNull(remarks));
                 if (approve && "ADMIN".equals(reviewerRole)) {
                     notifyRole(connection, "DIRECTOR", requestId,
                             "Request awaiting final approval",
-                            "A borrowing request approved by the administrator needs your final decision.");
+                            "A borrowing request approved by the administrator needs your final decision.",
+                            null, event);
+                    notifyGroupStaff(connection, requestId, "ASSIGNED",
+                            "Request approved by administrator",
+                            "A request your department approved passed administrative review and awaits final approval.",
+                            event);
                 } else if (approve) {
                     notifyGroupStaff(connection, requestId, "ASSIGNED",
                             "Equipment ready for release",
-                            "A request was given final approval. Record the equipment condition and release it.");
+                            "A request was given final approval. Record the equipment condition and release your department's equipment.",
+                            event);
+                    notifyRole(connection, "ADMIN", requestId,
+                            "Request given final approval",
+                            "The campus director approved this request. Departments can now release their equipment.",
+                            null, event);
+                } else if ("DIRECTOR".equals(reviewerRole)) {
+                    notifyRole(connection, "ADMIN", requestId,
+                            "Request declined by campus director",
+                            "The campus director declined this request. Reason: " + remarks.trim(),
+                            null, event);
                 }
                 notifyBorrower(connection, requestId,
-                        approve ? "Request approved" : "Request rejected",
+                        approve ? "Request approved" : "Request declined",
                         approve
                                 ? ("ADMIN".equals(reviewerRole)
                                         ? "Your request is waiting for final campus director review."
-                                        : "Your equipment request has been approved.")
-                                : "Your request was rejected. Remarks: " + remarks.trim());
+                                        : "Your equipment request has been approved. Each department will release its equipment.")
+                                : "Your request was declined. Remarks: " + remarks.trim(),
+                        null, event);
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
                 throw exception;
             }
+        }
+    }
+
+    /** One department group row with its schedule (occurrence or request-level). */
+    private static final class GroupRow {
+        private final long groupId;
+        private final String status;
+        private final LocalDate eventDate;
+        private final java.time.LocalTime startTime;
+        private final java.time.LocalTime endTime;
+
+        private GroupRow(long groupId, String status, LocalDate eventDate,
+                java.time.LocalTime startTime, java.time.LocalTime endTime) {
+            this.groupId = groupId;
+            this.status = status;
+            this.eventDate = eventDate;
+            this.startTime = startTime;
+            this.endTime = endTime;
+        }
+    }
+
+    /** Locks the request row so concurrent department actions are serialized. */
+    private String lockRequestStatus(Connection connection, long requestId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT status FROM borrow_requests WHERE request_id = ? FOR UPDATE")) {
+            statement.setLong(1, requestId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalArgumentException("Request was not found.");
+                }
+                return result.getString(1);
+            }
+        }
+    }
+
+    private void touchRequest(Connection connection, long requestId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE borrow_requests SET updated_at = CURRENT_TIMESTAMP WHERE request_id = ?")) {
+            statement.setLong(1, requestId);
+            statement.executeUpdate();
+        }
+    }
+
+    /** Locks the department's own groups, earliest schedule first. */
+    private List<GroupRow> lockRoleGroups(Connection connection, long requestId, String role)
+            throws SQLException {
+        List<GroupRow> groups = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT rg.group_id, rg.status,
+                       COALESCE(ro.event_date, br.event_date) AS event_date,
+                       COALESCE(ro.start_time, br.start_time) AS start_time,
+                       COALESCE(ro.end_time, br.end_time) AS end_time
+                FROM request_groups rg
+                JOIN borrow_requests br ON br.request_id = rg.request_id
+                LEFT JOIN request_occurrences ro ON ro.occurrence_id = rg.occurrence_id
+                WHERE rg.request_id = ? AND rg.custodian_role = ?
+                ORDER BY 3, 4, rg.group_id
+                FOR UPDATE OF rg
+                """)) {
+            statement.setLong(1, requestId);
+            statement.setString(2, role);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    groups.add(new GroupRow(
+                            result.getLong("group_id"),
+                            result.getString("status"),
+                            result.getDate("event_date").toLocalDate(),
+                            result.getTime("start_time").toLocalTime(),
+                            result.getTime("end_time").toLocalTime()));
+                }
+            }
+        }
+        return groups;
+    }
+
+    private Map<Long, Integer> lockGroupItems(Connection connection, long groupId)
+            throws SQLException {
+        Map<Long, Integer> requested = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT requested_equipment_id, requested_quantity
+                FROM request_items
+                WHERE group_id = ?
+                FOR UPDATE
+                """)) {
+            statement.setLong(1, groupId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    requested.put(result.getLong(1), result.getInt(2));
+                }
+            }
+        }
+        return requested;
+    }
+
+    private static void requireStaffReview(String requestStatus) {
+        if (!"PENDING_STAFF".equals(requestStatus) && !"NEEDS_ACTION".equals(requestStatus)) {
+            throw new IllegalArgumentException(
+                    "This request is no longer waiting for department review.");
+        }
+    }
+
+    private static List<GroupRow> pendingGroups(List<GroupRow> groups) {
+        if (groups.isEmpty()) {
+            throw new SecurityException(
+                    "This request has no equipment assigned to your department.");
+        }
+        List<GroupRow> pending = new ArrayList<>();
+        for (GroupRow group : groups) {
+            if ("PENDING".equals(group.status)) {
+                pending.add(group);
+            }
+        }
+        if (pending.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Your department already processed this request.");
+        }
+        return pending;
+    }
+
+    private static GroupRow firstWithStatus(List<GroupRow> groups, String status) {
+        for (GroupRow group : groups) {
+            if (status.equals(group.status)) {
+                return group;
+            }
+        }
+        return null;
+    }
+
+    private static String releaseBlockedReason(List<GroupRow> groups) {
+        boolean pending = false, declined = false, released = false, cancelled = false;
+        for (GroupRow group : groups) {
+            switch (group.status) {
+                case "PENDING", "UNABLE" -> pending = true;
+                case "DECLINED" -> declined = true;
+                case "RELEASED", "RETURNED" -> released = true;
+                case "CANCELLED", "NOT_REQUIRED" -> cancelled = true;
+                default -> { }
+            }
+        }
+        if (pending) return "Your department's equipment is still pending approval.";
+        if (cancelled && !released && !declined) {
+            return "This request was declined or cancelled, so nothing can be released.";
+        }
+        if (declined && !released) return "Your department declined this equipment, so it cannot be released.";
+        if (released) return "Your department's equipment was already released.";
+        return "This equipment cannot be released.";
+    }
+
+    private static String stageBlockedReason(String requestStatus) {
+        return switch (requestStatus) {
+            case "PENDING_STAFF", "NEEDS_ACTION", "PENDING_ADMIN" ->
+                    "The request is still waiting for administrative approval.";
+            case "PENDING_DIRECTOR" -> "The request is still waiting for final director approval.";
+            case "REJECTED" -> "This request was declined and cannot be released.";
+            case "CANCELLED" -> "This request was cancelled.";
+            default -> "Only approved equipment can be released.";
+        };
+    }
+
+    /**
+     * Moves the request forward once every department decided: to admin review when
+     * at least one department approved, or to declined when all departments declined.
+     */
+    private String advanceAfterDepartmentDecision(
+            Connection connection, long requestId, String currentStatus) throws SQLException {
+        int undecided;
+        int approved;
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*) FILTER (WHERE status IN ('PENDING', 'UNABLE')),
+                       COUNT(*) FILTER (WHERE status = 'ASSIGNED')
+                FROM request_groups
+                WHERE request_id = ?
+                """)) {
+            statement.setLong(1, requestId);
+            try (ResultSet result = statement.executeQuery()) {
+                result.next();
+                undecided = result.getInt(1);
+                approved = result.getInt(2);
+            }
+        }
+        if (undecided > 0) {
+            touchRequest(connection, requestId);
+            return currentStatus;
+        }
+        String nextStatus = approved > 0 ? "PENDING_ADMIN" : "REJECTED";
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE borrow_requests
+                SET status = ?,
+                    remarks = CASE WHEN ? THEN 'All departments declined their equipment.'
+                                   ELSE remarks END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE request_id = ?
+                """)) {
+            statement.setString(1, nextStatus);
+            statement.setBoolean(2, "REJECTED".equals(nextStatus));
+            statement.setLong(3, requestId);
+            statement.executeUpdate();
+        }
+        return nextStatus;
+    }
+
+    private void notifyAfterDepartmentDecision(
+            Connection connection, long requestId, String previousStatus, String nextStatus)
+            throws SQLException {
+        if (previousStatus.equals(nextStatus)) {
+            return;
+        }
+        if ("PENDING_ADMIN".equals(nextStatus)) {
+            notifyBorrower(connection, requestId,
+                    "Request ready for approval",
+                    "Every department finished its review. Your request is waiting for administrative review.",
+                    null, "PENDING_ADMIN");
+            notifyRole(connection, "ADMIN", requestId,
+                    "Request awaiting review",
+                    "All departments decided on this request. It is waiting for administrative review.",
+                    null, "PENDING_ADMIN");
+        } else if ("REJECTED".equals(nextStatus)) {
+            notifyBorrower(connection, requestId,
+                    "Request declined",
+                    "Every department declined its equipment, so the request was declined.",
+                    null, "DECLINED");
+            notifyRole(connection, "ADMIN", requestId,
+                    "Request declined by all departments",
+                    "Every department declined its equipment for this request.",
+                    null, "DECLINED");
         }
     }
 
@@ -1008,35 +1316,71 @@ public class BorrowRequestService {
     private void notifyRole(
             Connection connection, String role, long requestId, String title, String message)
             throws SQLException {
+        notifyRole(connection, role, requestId, title, message, null, null);
+    }
+
+    private void notifyRole(
+            Connection connection, String role, long requestId, String title, String message,
+            String department, String action) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO notifications (user_id, request_id, title, message)
-                SELECT user_id, ?, ?, ?
+                INSERT INTO notifications (user_id, request_id, title, message, department, action)
+                SELECT user_id, ?, ?, ?, ?, ?
                 FROM users
                 WHERE role = ? AND active = TRUE
                 """)) {
             statement.setLong(1, requestId);
             statement.setString(2, title);
             statement.setString(3, message);
-            statement.setString(4, role);
+            statement.setString(4, department);
+            statement.setString(5, action);
+            statement.setString(6, role);
             statement.executeUpdate();
         }
     }
 
-    /** Notifies staff whose equipment group on the request has the given status. */
+    /** Notifies every active staff member of one department, except the actor. */
+    private void notifyDepartment(
+            Connection connection, String role, long requestId, long excludedUserId,
+            String title, String message, String action) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO notifications (user_id, request_id, title, message, department, action)
+                SELECT user_id, ?, ?, ?, ?, ?
+                FROM users
+                WHERE role = ? AND active = TRUE AND user_id <> ?
+                """)) {
+            statement.setLong(1, requestId);
+            statement.setString(2, title);
+            statement.setString(3, message);
+            statement.setString(4, role);
+            statement.setString(5, action);
+            statement.setString(6, role);
+            statement.setLong(7, excludedUserId);
+            statement.executeUpdate();
+        }
+    }
+
     private void notifyGroupStaff(
             Connection connection, long requestId, String groupStatus,
             String title, String message) throws SQLException {
+        notifyGroupStaff(connection, requestId, groupStatus, title, message, null);
+    }
+
+    /** Notifies staff whose department group on the request has the given status. */
+    private void notifyGroupStaff(
+            Connection connection, long requestId, String groupStatus,
+            String title, String message, String action) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO notifications (user_id, request_id, title, message)
-                SELECT u.user_id, rg.request_id, ?, ?
+                INSERT INTO notifications (user_id, request_id, title, message, department, action)
+                SELECT DISTINCT u.user_id, rg.request_id, ?, ?, rg.custodian_role, ?
                 FROM request_groups rg
                 JOIN users u ON u.role = rg.custodian_role AND u.active = TRUE
                 WHERE rg.request_id = ? AND rg.status = ?
                 """)) {
             statement.setString(1, title);
             statement.setString(2, message);
-            statement.setLong(3, requestId);
-            statement.setString(4, groupStatus);
+            statement.setString(3, action);
+            statement.setLong(4, requestId);
+            statement.setString(5, groupStatus);
             statement.executeUpdate();
         }
     }
@@ -1044,19 +1388,26 @@ public class BorrowRequestService {
     private void notifyBorrower(
             Connection connection, long requestId, String title, String message)
             throws SQLException {
+        notifyBorrower(connection, requestId, title, message, null, null);
+    }
+
+    private void notifyBorrower(
+            Connection connection, long requestId, String title, String message,
+            String department, String action) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO notifications (user_id, request_id, title, message)
-                SELECT borrower_id, request_id, ?, ?
+                INSERT INTO notifications (user_id, request_id, title, message, department, action)
+                SELECT borrower_id, request_id, ?, ?, ?, ?
                 FROM borrow_requests
                 WHERE request_id = ?
                 """)) {
             statement.setString(1, title);
             statement.setString(2, message);
-            statement.setLong(3, requestId);
+            statement.setString(3, department);
+            statement.setString(4, action);
+            statement.setLong(5, requestId);
             statement.executeUpdate();
         }
     }
-
     private String requireCustodianRole(String role) {
         String normalizedRole = role == null ? "" : role.trim().toUpperCase();
         if (!"ICT_STAFF".equals(normalizedRole)
@@ -1100,7 +1451,8 @@ public class BorrowRequestService {
                 LEFT JOIN request_groups rg ON rg.group_id = ri.group_id
                 LEFT JOIN equipment e ON e.equipment_id = ri.requested_equipment_id
                 WHERE %s
-                ORDER BY br.submitted_at DESC, br.request_id DESC, e.equipment_name
+                ORDER BY br.submitted_at DESC, br.request_id DESC, e.equipment_name,
+                         ri.request_item_id
                 """.formatted(predicate);
 
         Map<Long, BorrowRequestBuilder> builders = new LinkedHashMap<>();
@@ -1118,7 +1470,7 @@ public class BorrowRequestService {
                         builders.put(id, builder);
                     }
                     if (result.getObject("equipment_id") != null) {
-                        builder.items.add(new EquipmentRequestItem(
+                        builder.addItem(new EquipmentRequestItem(
                                 result.getLong("equipment_id"),
                                 result.getString("equipment_code"),
                                 result.getString("equipment_name"),
@@ -1136,28 +1488,34 @@ public class BorrowRequestService {
                     }
                 }
             }
+            if (!builders.isEmpty()) {
+                loadOccurrences(connection, builders);
+                loadDepartments(connection, builders);
+            }
         }
 
         List<BorrowRequest> requests = new ArrayList<>();
-        if (!builders.isEmpty()) {
-            loadOccurrences(null, builders);
-        }
         for (BorrowRequestBuilder builder : builders.values()) {
             requests.add(builder.build());
         }
         return requests;
     }
 
-    private void loadOccurrences(Connection ignored, Map<Long, BorrowRequestBuilder> builders)
-            throws SQLException {
-        if (builders.isEmpty()) return;
+    private static String placeholders(int count) {
         StringBuilder in = new StringBuilder();
-        for (int i = 0; i < builders.size(); i++) { if (i > 0) in.append(','); in.append('?'); }
+        for (int i = 0; i < count; i++) {
+            if (i > 0) in.append(',');
+            in.append('?');
+        }
+        return in.toString();
+    }
+
+    private void loadOccurrences(Connection connection, Map<Long, BorrowRequestBuilder> builders)
+            throws SQLException {
         String q = "SELECT occurrence_id, request_id, event_date, start_time, end_time, venue "
-                + "FROM request_occurrences WHERE request_id IN (" + in
+                + "FROM request_occurrences WHERE request_id IN (" + placeholders(builders.size())
                 + ") ORDER BY event_date, start_time, occurrence_id";
-        try (Connection c = Database.getConnection();
-             PreparedStatement ps = c.prepareStatement(q)) {
+        try (PreparedStatement ps = connection.prepareStatement(q)) {
             int i = 1;
             for (Long id : builders.keySet()) ps.setLong(i++, id);
             try (ResultSet rs = ps.executeQuery()) {
@@ -1174,6 +1532,63 @@ public class BorrowRequestService {
         }
     }
 
+    /** Loads each department's decision, remarks, and release records. */
+    private void loadDepartments(Connection connection, Map<Long, BorrowRequestBuilder> builders)
+            throws SQLException {
+        String q = """
+                SELECT rg.group_id, rg.request_id, rg.custodian_role, rg.status,
+                       rg.occurrence_id, rg.staff_remarks,
+                       COALESCE(ro.event_date, br.event_date) AS event_date,
+                       COALESCE(ro.start_time, br.start_time) AS start_time,
+                       COALESCE(ro.end_time, br.end_time) AS end_time,
+                       CASE WHEN rg.status = 'DECLINED' THEN rg.declined_at
+                            ELSE rg.assigned_at END AS decided_at,
+                       CASE WHEN rg.status = 'DECLINED' THEN ud.full_name
+                            ELSE ua.full_name END AS decided_by,
+                       ur.full_name AS released_by, rg.released_at,
+                       ui.full_name AS inspected_by, rg.inspected_at
+                FROM request_groups rg
+                JOIN borrow_requests br ON br.request_id = rg.request_id
+                LEFT JOIN request_occurrences ro ON ro.occurrence_id = rg.occurrence_id
+                LEFT JOIN users ua ON ua.user_id = rg.assigned_by
+                LEFT JOIN users ud ON ud.user_id = rg.declined_by
+                LEFT JOIN users ur ON ur.user_id = rg.released_by
+                LEFT JOIN users ui ON ui.user_id = rg.inspected_by
+                WHERE rg.request_id IN (%s)
+                ORDER BY rg.custodian_role, 7, 8, rg.group_id
+                """.formatted(placeholders(builders.size()));
+        try (PreparedStatement ps = connection.prepareStatement(q)) {
+            int i = 1;
+            for (Long id : builders.keySet()) ps.setLong(i++, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    BorrowRequestBuilder b = builders.get(rs.getLong("request_id"));
+                    if (b == null) continue;
+                    LocalDate date = rs.getDate("event_date").toLocalDate();
+                    long occurrence = rs.getLong("occurrence_id");
+                    Long occurrenceId = rs.wasNull() ? null : occurrence;
+                    b.departments.add(new DepartmentStatus(
+                            rs.getLong("group_id"),
+                            rs.getString("custodian_role"),
+                            rs.getString("status"),
+                            occurrenceId,
+                            LocalDateTime.of(date, rs.getTime("start_time").toLocalTime()),
+                            LocalDateTime.of(date, rs.getTime("end_time").toLocalTime()),
+                            rs.getString("staff_remarks"),
+                            rs.getString("decided_by"),
+                            toDateTime(rs.getTimestamp("decided_at")),
+                            rs.getString("released_by"),
+                            toDateTime(rs.getTimestamp("released_at")),
+                            rs.getString("inspected_by"),
+                            toDateTime(rs.getTimestamp("inspected_at"))));
+                }
+            }
+        }
+    }
+
+    private static LocalDateTime toDateTime(java.sql.Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
     private void validate(BorrowRequestForm form) {
         if (form == null) {
             throw new IllegalArgumentException("Request details are required.");
@@ -1384,59 +1799,6 @@ public class BorrowRequestService {
         return groups;
     }
 
-    private Map<String, Long> prepareGroupsForEdit(
-            Connection connection,
-            long requestId,
-            Map<Long, EquipmentRecord> equipment) throws SQLException {
-        Map<String, Long> groups = new HashMap<>();
-        try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT group_id, custodian_role, status
-                FROM request_groups
-                WHERE request_id = ?
-                FOR UPDATE
-                """)) {
-            statement.setLong(1, requestId);
-            try (ResultSet result = statement.executeQuery()) {
-                while (result.next()) {
-                    groups.put(result.getString("custodian_role"),
-                            result.getLong("group_id"));
-                }
-            }
-        }
-
-        Set<String> usedRoles = new HashSet<>();
-        for (EquipmentRecord record : equipment.values()) {
-            if (usedRoles.add(record.custodianRole)
-                    && !groups.containsKey(record.custodianRole)) {
-                groups.put(record.custodianRole,
-                        insertGroup(connection, requestId, record.custodianRole));
-            }
-        }
-
-        for (Map.Entry<String, Long> entry : groups.entrySet()) {
-            if (usedRoles.contains(entry.getKey())) {
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        UPDATE request_groups
-                        SET status = 'PENDING', cancelled_by = NULL, cancelled_at = NULL
-                        WHERE group_id = ?
-                        """)) {
-                    statement.setLong(1, entry.getValue());
-                    statement.executeUpdate();
-                }
-            } else {
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        UPDATE request_groups
-                        SET status = 'CANCELLED'
-                        WHERE group_id = ? AND status IN ('PENDING', 'UNABLE')
-                        """)) {
-                    statement.setLong(1, entry.getValue());
-                    statement.executeUpdate();
-                }
-            }
-        }
-        return groups;
-    }
-
     private long insertGroup(Connection connection, long requestId, Long occurrenceId, String role)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
@@ -1520,7 +1882,7 @@ public class BorrowRequestService {
                 SELECT COUNT(*)
                 FROM request_groups
                 WHERE request_id = ?
-                  AND status NOT IN ('PENDING', 'UNABLE', 'CANCELLED')
+                  AND status NOT IN ('PENDING', 'UNABLE', 'CANCELLED', 'DECLINED')
                 """)) {
             statement.setLong(1, requestId);
             try (ResultSet result = statement.executeQuery()) {
@@ -1595,8 +1957,10 @@ public class BorrowRequestService {
         private final String status;
         private final String remarks;
         private final LocalDateTime submittedAt;
-        private final List<EquipmentRequestItem> items = new ArrayList<>();
+        /** One line per equipment; multi-schedule copies are merged to avoid duplicates. */
+        private final Map<Long, EquipmentRequestItem> items = new LinkedHashMap<>();
         private final List<RequestOccurrence> occurrences = new ArrayList<>();
+        private final List<DepartmentStatus> departments = new ArrayList<>();
         private final String borrowerType;
 
         private BorrowRequestBuilder(ResultSet result) throws SQLException {
@@ -1618,12 +1982,58 @@ public class BorrowRequestService {
             submittedAt = result.getTimestamp("submitted_at").toLocalDateTime();
         }
 
+        private void addItem(EquipmentRequestItem item) {
+            EquipmentRequestItem existing = items.get(item.getEquipmentId());
+            if (existing == null) {
+                items.put(item.getEquipmentId(), item);
+                return;
+            }
+            items.put(item.getEquipmentId(), new EquipmentRequestItem(
+                    existing.getEquipmentId(), existing.getEquipmentCode(),
+                    existing.getEquipmentName(), existing.getCategory(),
+                    existing.getRequestedQuantity(),
+                    Math.max(existing.getAssignedQuantity(), item.getAssignedQuantity()),
+                    Math.max(existing.getReleasedQuantity(), item.getReleasedQuantity()),
+                    Math.max(existing.getReturnedQuantity(), item.getReturnedQuantity()),
+                    existing.getCustodianRole(), existing.getGroupStatus(),
+                    Math.max(existing.getDamagedQuantity(), item.getDamagedQuantity()),
+                    Math.max(existing.getMissingQuantity(), item.getMissingQuantity()),
+                    existing.getConditionBefore() != null
+                            ? existing.getConditionBefore() : item.getConditionBefore(),
+                    existing.getConditionAfter() != null
+                            ? existing.getConditionAfter() : item.getConditionAfter()));
+        }
+
         private BorrowRequest build() {
+            BorrowRequest draft = create(new ArrayList<>(items.values()));
+            // Each item shows its department's combined status across all schedules.
+            Map<String, String> roleStatus = new HashMap<>();
+            List<EquipmentRequestItem> merged = new ArrayList<>();
+            for (EquipmentRequestItem item : items.values()) {
+                String role = item.getCustodianRole();
+                String combined = role == null ? item.getGroupStatus()
+                        : roleStatus.computeIfAbsent(role,
+                                key -> RequestStatus.department(draft, key));
+                merged.add(new EquipmentRequestItem(
+                        item.getEquipmentId(), item.getEquipmentCode(),
+                        item.getEquipmentName(), item.getCategory(),
+                        item.getRequestedQuantity(), item.getAssignedQuantity(),
+                        item.getReleasedQuantity(), item.getReturnedQuantity(),
+                        role, combined == null ? item.getGroupStatus() : combined,
+                        item.getDamagedQuantity(), item.getMissingQuantity(),
+                        item.getConditionBefore(), item.getConditionAfter()));
+            }
+            return create(merged);
+        }
+
+        private BorrowRequest create(List<EquipmentRequestItem> requestItems) {
             BorrowRequest request = new BorrowRequest(
                     requestId, requestCode, borrowerId, borrowerName, venue,
                     eventDate, startTime, endTime, purpose, participants,
-                    personInCharge, position, status, remarks, submittedAt, items, occurrences);
+                    personInCharge, position, status, remarks, submittedAt,
+                    requestItems, occurrences);
             request.setBorrowerType(borrowerType);
+            request.setDepartments(departments);
             return request;
         }
     }

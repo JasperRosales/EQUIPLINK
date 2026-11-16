@@ -27,6 +27,7 @@ public class BorrowRequest {
     private final List<EquipmentRequestItem> equipmentItems;
     private final List<RequestOccurrence> occurrences;
     private String borrowerType;
+    private List<DepartmentStatus> departments = List.of();
 
     /** Faculty first, then everything else; stable for other orderings. */
     public static final java.util.Comparator<BorrowRequest> PRIORITY_FIRST =
@@ -117,6 +118,55 @@ public class BorrowRequest {
 
     public void setBorrowerType(String borrowerType) {
         this.borrowerType = borrowerType;
+    }
+
+    /** Per-department (ICT / Facility) processing records. */
+    public List<DepartmentStatus> getDepartments() {
+        return departments;
+    }
+
+    public void setDepartments(List<DepartmentStatus> departments) {
+        this.departments = Collections.unmodifiableList(
+                new ArrayList<>(departments == null ? List.of() : departments));
+    }
+
+    /** True when the request contains equipment handled by the given department. */
+    public boolean involvesDepartment(String role) {
+        for (DepartmentStatus department : departments) {
+            if (role != null && role.equalsIgnoreCase(department.getCustodianRole())) {
+                return true;
+            }
+        }
+        for (EquipmentRequestItem item : equipmentItems) {
+            if (role != null && role.equalsIgnoreCase(item.getCustodianRole())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Earliest scheduled start across all schedules of this request. */
+    public LocalDateTime getFirstScheduleStart() {
+        LocalDateTime first = eventDate == null || startTime == null
+                ? null : LocalDateTime.of(eventDate, startTime);
+        for (RequestOccurrence occurrence : occurrences) {
+            LocalDateTime start = LocalDateTime.of(
+                    occurrence.getEventDate(), occurrence.getStartTime());
+            if (first == null || start.isBefore(first)) {
+                first = start;
+            }
+        }
+        return first;
+    }
+
+    /** Overall status computed from every department's progress. */
+    public String getOverallStatus() {
+        return RequestStatus.overall(this, null);
+    }
+
+    /** Overall status limited to one department's equipment (staff views). */
+    public String getOverallStatus(String scopeRole) {
+        return RequestStatus.overall(this, scopeRole);
     }
 
     /** Faculty requests are processed with priority. */

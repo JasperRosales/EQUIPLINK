@@ -25,6 +25,26 @@ public class NotificationController {
         notificationService.markAllRead(userId);
     }
 
+    public int countUnread(long userId) throws Exception {
+        return notificationService.countUnread(userId);
+    }
+
+    public void delete(long userId, long notificationId) throws Exception {
+        notificationService.delete(userId, notificationId);
+    }
+
+    public int deleteAll(long userId) throws Exception {
+        return notificationService.deleteAll(userId);
+    }
+
+    public String changeToken(long userId) throws Exception {
+        return notificationService.changeToken(userId);
+    }
+
+    public void runOverdueSweep() throws Exception {
+        notificationService.runOverdueSweep();
+    }
+
     public boolean hasPendingReminderToday(long userId) throws Exception {
         return notificationService.hasPendingReminderToday(userId);
     }

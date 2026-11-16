@@ -112,6 +112,7 @@ Available quantity is derived: `total_quantity - damaged_quantity - lost_quantit
 | `director_status` | `VARCHAR(20)` | nullable | Director decision: `APPROVED` or `REJECTED`. |
 | `remarks` | `TEXT` | nullable | Reviewer remarks. |
 | `has_issues` | `BOOLEAN` | `NOT NULL DEFAULT FALSE` | Set when return inspection finds damage/missing items. |
+| `overdue_notified` | `BOOLEAN` | `NOT NULL DEFAULT FALSE` | Set once the admin/director "review not processed on time" notice was sent. |
 | `cancelled_by` | `BIGINT` | nullable → `users(user_id)` | Who cancelled the request. |
 | `cancelled_at` | `TIMESTAMP` | nullable | When it was cancelled. |
 | `cancellation_reason` | `TEXT` | nullable | Why it was cancelled. |
@@ -140,9 +141,15 @@ One processing lane per custodian role within a request.
 | `inspected_at` | `TIMESTAMP` | nullable | When inspection happened. |
 | `cancelled_by` | `BIGINT` | nullable → `users(user_id)` | Who cancelled the group. |
 | `cancelled_at` | `TIMESTAMP` | nullable | When it was cancelled. |
-| `staff_remarks` | `TEXT` | nullable | Staff notes (e.g. reason for requesting changes). |
+| `staff_remarks` | `TEXT` | nullable | Department remarks (e.g. decline reason, reason for requesting changes). |
+| `declined_by` | `BIGINT` | nullable → `users(user_id)` | Staff who declined this department's equipment. |
+| `declined_at` | `TIMESTAMP` | nullable | When the department declined. |
+| `occurrence_id` | `BIGINT` | nullable → `request_occurrences` | Schedule this group belongs to (multi-schedule requests). |
+| `overdue_notified` | `BOOLEAN` | `NOT NULL DEFAULT FALSE` | Set once the "not processed on time" notice was sent. |
 
-**Constraints:** `UNIQUE(request_id, custodian_role)` — at most one group per staff role per request.
+Each department (ICT / Facility) owns its own group rows, so its decision, remarks, release, and return records are never written by the other department.
+
+**Constraints:** one group per staff role per schedule (`idx_request_groups_occ_role`).
 
 **Index:** `idx_groups_status_role` on `(custodian_role, status)`.
 
@@ -178,6 +185,11 @@ Individual equipment lines within a request group, tracked through the whole lif
 | `title` | `VARCHAR(150)` | `NOT NULL` | Short heading. |
 | `message` | `TEXT` | `NOT NULL` | Body text. |
 | `is_read` | `BOOLEAN` | `NOT NULL DEFAULT FALSE` | Read flag. |
+| `read_at` | `TIMESTAMP` | nullable | When the recipient opened it. |
+| `department` | `VARCHAR(20)` | nullable | Department involved (`ICT_STAFF` / `FACILITY_STAFF`). |
+| `action` | `VARCHAR(40)` | nullable | Event that caused it (e.g. `DEPARTMENT_DECLINED`, `EQUIPMENT_RELEASED`, `OVERDUE`). |
+| `is_deleted` | `BOOLEAN` | `NOT NULL DEFAULT FALSE` | Removed from this user's panel (soft delete; never affects requests or history). |
+| `deleted_at` | `TIMESTAMP` | nullable | When it was removed. |
 | `created_at` | `TIMESTAMP` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | When it was sent. |
 
 **Index:** `idx_notifications_user_read` on `(user_id, is_read)`.
@@ -208,14 +220,14 @@ Append-only audit trail; rows are never updated, only inserted.
 
 | Status | Meaning |
 |---|---|
-| `PENDING_STAFF` | Submitted; waiting for ICT/facility staff to assign equipment. |
+| `PENDING_STAFF` | Submitted; waiting for ICT/facility staff to approve or decline their equipment. |
 | `NEEDS_ACTION` | Staff requested changes; borrower must edit and resubmit. |
-| `PENDING_ADMIN` | All groups assigned; waiting for administrator review. |
+| `PENDING_ADMIN` | Every department decided and at least one approved; waiting for administrator review. |
 | `PENDING_DIRECTOR` | Admin approved; waiting for the campus director's final decision. |
-| `APPROVED` | Director approved; staff may release equipment. |
-| `RELEASED` | Equipment handed to the borrower. |
+| `APPROVED` | Director approved; each department may release its approved equipment independently. |
+| `RELEASED` | Every approved department released its equipment. |
 | `COMPLETED` | Equipment returned and inspection finished. |
-| `REJECTED` | Rejected by admin or director (terminal). |
+| `REJECTED` | Declined by admin or director, or every department declined (terminal; shown as "Declined"). |
 | `CANCELLED` | Cancelled by borrower or reviewer (terminal). |
 
 ### 4.2 `request_groups.status`
@@ -226,7 +238,8 @@ Append-only audit trail; rows are never updated, only inserted.
 |---|---|
 | `PENDING` | Waiting for this staff role to process its items. |
 | `ASSIGNED` | Equipment assigned (or the group is resolved). |
-| `UNABLE` | This role cannot fulfill its items. |
+| `UNABLE` | This role asked the borrower for changes. |
+| `DECLINED` | This department declined its equipment; other departments continue independently. |
 | `RELEASED` | Equipment handed over to the borrower. |
 | `RETURNED` | Equipment returned and inspected. |
 | `CANCELLED` | Group cancelled with the request. |
@@ -236,9 +249,25 @@ Append-only audit trail; rows are never updated, only inserted.
 
 Events written by `BorrowRequestService`:
 
-`SUBMITTED`, `BORROWER_EDITED`, `BORROWER_CANCELLED`, `EQUIPMENT_ASSIGNED`, `STAFF_REQUESTED_CHANGES`, `EQUIPMENT_RELEASED`, `EQUIPMENT_RETURNED`, `ADMIN_APPROVED`, `ADMIN_REJECTED`, `DIRECTOR_APPROVED`, `DIRECTOR_REJECTED`.
+`SUBMITTED`, `BORROWER_EDITED`, `BORROWER_CANCELLED`, `EQUIPMENT_ASSIGNED` (department approved), `DEPARTMENT_DECLINED`, `STAFF_REQUESTED_CHANGES`, `EQUIPMENT_RELEASED`, `EQUIPMENT_RETURNED`, `ADMIN_APPROVED`, `ADMIN_REJECTED`, `DIRECTOR_APPROVED`, `DIRECTOR_REJECTED`.
 
-### 4.4 Other enumerations
+### 4.4 Overall request status (computed)
+
+The overall status is derived from every department's group status in `RequestStatus.overall(...)` and is never stored, so dashboards and filters cannot go stale. Staff views compute it from their own department only.
+
+| Overall status | Rule |
+|---|---|
+| Pending | No department approved yet. |
+| Partially Approved | At least one department approved; another is pending or declined. |
+| Fully Approved | Every department approved. |
+| Partially Released | Some approved equipment released, or one department released while another declined. |
+| Fully Released | Every department's equipment released. |
+| Completed | All released equipment returned. |
+| Declined | Every department declined, or admin/director declined. |
+| Not Assigned | A department did not approve/decline before the schedule started (overdue). |
+| Not Processed on Time | Admin/director review, or a release, did not happen in time (overdue). |
+
+### 4.5 Other enumerations
 
 | Domain | Values |
 |---|---|

@@ -15,6 +15,10 @@ public class Notification {
     private final String requestEquipment;
     private final String requestCategories;
     private final LocalDate eventDate;
+    private String requestCode;
+    private String department;
+    private String action;
+    private String requestStatus;
 
     public Notification(
             long notificationId,
@@ -61,4 +65,18 @@ public class Notification {
     public String getRequestEquipment() { return requestEquipment; }
     public String getRequestCategories() { return requestCategories; }
     public LocalDate getEventDate() { return eventDate; }
+    public String getRequestCode() { return requestCode; }
+    public String getDepartment() { return department; }
+    public String getAction() { return action; }
+    public String getRequestStatus() { return requestStatus; }
+
+    /** Adds the related request reference and the department/action that caused it. */
+    public Notification withDetails(
+            String requestCode, String department, String action, String requestStatus) {
+        this.requestCode = requestCode;
+        this.department = department;
+        this.action = action;
+        this.requestStatus = requestStatus;
+        return this;
+    }
 }

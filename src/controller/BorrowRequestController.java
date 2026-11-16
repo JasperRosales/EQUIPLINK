@@ -28,6 +28,10 @@ public class BorrowRequestController {
         return requestService.findBorrowingHistory(borrowerId);
     }
 
+    public List<BorrowRequest> findAllForBorrower(long borrowerId) throws Exception {
+        return requestService.findAllForBorrower(borrowerId);
+    }
+
     public BorrowRequest findRequest(long borrowerId, long requestId) throws Exception {
         return requestService.findRequest(borrowerId, requestId);
     }
@@ -76,9 +80,31 @@ public class BorrowRequestController {
         return requestService.findDirectorQueue();
     }
 
+    /** All requests the actor may monitor; staff only see their department's. */
     public List<BorrowRequest> findAllRequests(User actor) throws Exception {
-        requireRole(actor, "ICT_STAFF", "ADMIN", "DIRECTOR");
-        return requestService.findAllRequests();
+        requireRole(actor, "ICT_STAFF", "FACILITY_STAFF", "ADMIN", "DIRECTOR");
+        return requestService.findAllRequests(actor.getRole());
+    }
+
+    /** Every request the actor can see, used for dashboard counters. */
+    public List<BorrowRequest> findVisibleRequests(User actor) throws Exception {
+        if (actor != null && "BORROWER".equalsIgnoreCase(actor.getRole())) {
+            return requestService.findAllForBorrower(actor.getUserId());
+        }
+        return findAllRequests(actor);
+    }
+
+    public BorrowRequest findRequestForUser(User actor, long requestId) throws Exception {
+        if (actor == null) {
+            throw new SecurityException("A signed-in account is required.");
+        }
+        BorrowRequest request = requestService.findRequestForUser(
+                actor.getRole(), actor.getUserId(), requestId);
+        if (request == null) {
+            throw new IllegalArgumentException(
+                    "The request was not found or is not available to your account.");
+        }
+        return request;
     }
 
     public List<BorrowRequest> findScheduleForRole(User actor) throws Exception {
@@ -100,6 +126,13 @@ public class BorrowRequestController {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
         requestService.assignStaffRequest(
                 actor.getRole(), actor.getUserId(), requestId, assignments);
+    }
+
+    public void declineStaffRequest(
+            User actor, long requestId, String remarks) throws Exception {
+        requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
+        requestService.declineStaffRequest(
+                actor.getRole(), actor.getUserId(), requestId, remarks);
     }
 
     public void markStaffRequestNeedsAction(

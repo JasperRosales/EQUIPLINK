@@ -24,7 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class MyRequestsPanel extends JPanel {
+public class MyRequestsPanel extends JPanel implements Refreshable {
 
     private final long borrowerId;
     private final BorrowRequestController requestController;
@@ -36,7 +36,12 @@ public class MyRequestsPanel extends JPanel {
     private final JComboBox<String> dateSort = new JComboBox<>(
             new String[] { "Newest first", "Oldest first" });
     private final String statusFilter;
+    private final JComboBox<String> categoryFilter;
+    private final JLabel resultCount = new JLabel(" ");
     private List<BorrowRequest> requests = List.of();
+    private boolean loading;
+
+    private static final String ALL_ACTIVE = "All active requests";
 
     public MyRequestsPanel(
             long borrowerId,
@@ -57,11 +62,27 @@ public class MyRequestsPanel extends JPanel {
         this.editHandler = editHandler;
         this.changedHandler = changedHandler;
         this.statusFilter = statusFilter == null ? "ALL" : statusFilter;
+        List<String> options = new ArrayList<>();
+        options.add(ALL_ACTIVE);
+        for (src.model.RequestStatus.Category category : src.model.RequestStatus.Category.values()) {
+            if (category != src.model.RequestStatus.Category.ALL) {
+                options.add(category.getLabel());
+            }
+        }
+        categoryFilter = new JComboBox<>(options.toArray(new String[0]));
+        if ("PENDING".equals(this.statusFilter)) {
+            categoryFilter.setSelectedItem(src.model.RequestStatus.Category.PENDING.getLabel());
+        } else if ("BORROWED".equals(this.statusFilter)) {
+            categoryFilter.setSelectedItem(src.model.RequestStatus.Category.FULLY_RELEASED.getLabel());
+        } else if (!"ALL".equals(this.statusFilter)) {
+            categoryFilter.setSelectedItem(
+                    src.model.RequestStatus.Category.fromLabel(this.statusFilter).getLabel());
+        }
 
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(AppTheme.background());
         setBorder(new EmptyBorder(2, 2, 22, 2));
-        JLabel heading = new JLabel("Your active requests");
+        JLabel heading = new JLabel("Your requests");
         heading.setFont(AppTheme.semibold(18));
         heading.setForeground(AppTheme.foreground());
         add(heading);
@@ -77,13 +98,22 @@ public class MyRequestsPanel extends JPanel {
         dateSort.setPreferredSize(new java.awt.Dimension(150, 40));
         dateSort.addActionListener(event -> showRequests());
         dateFilter.addChangeListener(this::showRequests);
+        categoryFilter.setFont(AppTheme.regular(12));
+        categoryFilter.setPreferredSize(new java.awt.Dimension(200, 40));
+        categoryFilter.setToolTipText("Filter by the latest request status");
+        categoryFilter.addActionListener(event -> showRequests());
         JPanel tools = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
         tools.setOpaque(false);
+        tools.add(categoryFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
         filters.add(tools, BorderLayout.EAST);
         add(filters);
-        add(Box.createVerticalStrut(12));
+        add(Box.createVerticalStrut(8));
+        resultCount.setFont(AppTheme.semibold(11));
+        resultCount.setForeground(AppTheme.primary());
+        add(resultCount);
+        add(Box.createVerticalStrut(8));
 
         requestCards.setOpaque(false);
         requestCards.setLayout(new BoxLayout(requestCards, BoxLayout.Y_AXIS));
@@ -91,20 +121,37 @@ public class MyRequestsPanel extends JPanel {
         reload();
     }
 
+    @Override
+    public void reloadData() {
+        reload(true);
+    }
+
     public void reload() {
-        requestCards.removeAll();
-        requestCards.add(messageCard("Loading your requests…", false));
-        requestCards.revalidate();
-        requestCards.repaint();
+        reload(false);
+    }
+
+    private void reload(boolean quiet) {
+        if (loading) {
+            return;
+        }
+        loading = true;
+        if (!quiet) {
+            requestCards.removeAll();
+            requestCards.add(messageCard("Loading your requests…", false));
+            requestCards.revalidate();
+            requestCards.repaint();
+        }
 
         new SwingWorker<List<BorrowRequest>, Void>() {
             @Override
             protected List<BorrowRequest> doInBackground() throws Exception {
-                return requestController.findActiveRequests(borrowerId);
+                // Every request the borrower owns, so any status category can be filtered.
+                return requestController.findAllForBorrower(borrowerId);
             }
 
             @Override
             protected void done() {
+                loading = false;
                 try {
                     requests = get();
                     showRequests();
@@ -123,7 +170,7 @@ public class MyRequestsPanel extends JPanel {
         String query = search.getText().trim().toLowerCase();
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
-            if (matchesFilter(request) && dateFilter.matches(request.getEventDate())
+            if (matchesFilter(request) && matchesDate(dateFilter, request)
                     && searchableText(request).contains(query)) {
                 filtered.add(request);
             }
@@ -133,10 +180,11 @@ public class MyRequestsPanel extends JPanel {
             byDate = byDate.reversed();
         }
         filtered.sort(byDate);
+        resultCount.setText(filtered.size() + " request(s) shown");
         if (filtered.isEmpty()) {
             requestCards.add(messageCard(
                     requests.isEmpty()
-                            ? "No pending or borrowed request yet. Start by requesting equipment."
+                            ? "No requests yet. Start by requesting equipment."
                             : "No requests match the current search or filter.",
                     false));
         } else {
@@ -150,15 +198,37 @@ public class MyRequestsPanel extends JPanel {
     }
 
     private boolean matchesFilter(BorrowRequest request) {
-        if ("PENDING".equals(statusFilter)) {
-            return "PENDING_STAFF".equals(request.getStatus())
-                    || "NEEDS_ACTION".equals(request.getStatus())
-                    || "PENDING_ADMIN".equals(request.getStatus())
-                    || "PENDING_DIRECTOR".equals(request.getStatus())
-                    || "APPROVED".equals(request.getStatus());
+        String selected = String.valueOf(categoryFilter.getSelectedItem());
+        if (ALL_ACTIVE.equals(selected)) {
+            return isActive(request);
         }
-        return !"BORROWED".equals(statusFilter)
-                || "RELEASED".equals(request.getStatus());
+        src.model.RequestStatus.Category category =
+                src.model.RequestStatus.Category.fromLabel(selected);
+        if (category == src.model.RequestStatus.Category.FULLY_RELEASED
+                && "BORROWED".equals(statusFilter)) {
+            // "Borrowed" shows every request with equipment currently released.
+            return src.model.RequestStatus.Category.FULLY_RELEASED.matches(request, null)
+                    || src.model.RequestStatus.Category.PARTIALLY_RELEASED.matches(request, null);
+        }
+        return category.matches(request, null);
+    }
+
+    private static boolean isActive(BorrowRequest request) {
+        String status = request.getStatus();
+        return !"COMPLETED".equals(status) && !"REJECTED".equals(status)
+                && !"CANCELLED".equals(status);
+    }
+
+    private static boolean matchesDate(src.ui.components.DateFilter filter, BorrowRequest request) {
+        if (filter.matches(request.getEventDate())) {
+            return true;
+        }
+        for (src.model.RequestOccurrence occurrence : request.getOccurrences()) {
+            if (filter.matches(occurrence.getEventDate())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String searchableText(BorrowRequest request) {
@@ -166,7 +236,8 @@ public class MyRequestsPanel extends JPanel {
                 .append(request.getRequestCode()).append(' ')
                 .append(request.getVenue()).append(' ')
                 .append(request.getPurpose()).append(' ')
-                .append(request.getStatus());
+                .append(request.getStatus()).append(' ')
+                .append(UiSupport.displayStatus(request.getOverallStatus()));
         for (var item : request.getEquipmentItems()) {
             text.append(' ').append(item.getEquipmentName())
                     .append(' ').append(item.getEquipmentCode());
@@ -227,10 +298,8 @@ public class MyRequestsPanel extends JPanel {
         JLabel code = new JLabel(request.getRequestCode());
         code.setFont(AppTheme.semibold(14));
         code.setForeground(AppTheme.foreground());
-        JLabel status = new src.ui.components.StatusBadge(request.getStatus());
-        status.setHorizontalAlignment(SwingConstants.RIGHT);
         titleRow.add(code, BorderLayout.WEST);
-        titleRow.add(status, BorderLayout.EAST);
+        titleRow.add(UiSupport.statusBadges(request, null, true), BorderLayout.EAST);
 
         String itemSummary = request.getEquipmentItems().isEmpty()
                 ? "No equipment items"

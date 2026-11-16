@@ -63,6 +63,17 @@ public class MainLayout extends JPanel {
         private Runnable logoutAction;
         private String currentPage = "Dashboard";
         private javax.swing.Timer reminderTimer;
+        /** Polls for request/notification changes so every dashboard stays in sync. */
+        private javax.swing.Timer liveSyncTimer;
+        private javax.swing.JComponent currentContent;
+        private String pageFilter;
+        private String lastChangeToken;
+        private boolean syncing;
+        private long lastOverdueSweep;
+        private long lastReload = System.currentTimeMillis();
+        private static final int LIVE_SYNC_MS = 8000;
+        private static final long OVERDUE_SWEEP_MS = 60_000L;
+        private static final long TIME_REFRESH_MS = 5 * 60_000L;
 
         public MainLayout(User user, AuthController authController) {
                 this(user, authController,
@@ -160,6 +171,7 @@ public class MainLayout extends JPanel {
                 add(mainPanel, BorderLayout.CENTER);
                 showPage("Dashboard");
                 schedulePendingReminder();
+                startLiveSync();
         }
 
         private JPanel createSidebarTop(String systemName, String[] navigationItems) {
@@ -308,7 +320,7 @@ public class MainLayout extends JPanel {
                                 return new String[] {
                                                 "Dashboard", "Inventory", "Requests",
                                                 "Schedule & Assignment", "Transaction History",
-                                                "Notifications", "Settings"
+                                                "All Requests", "Notifications", "Settings"
                                 };
                         case "DIRECTOR":
                                 return new String[] {
@@ -356,15 +368,28 @@ public class MainLayout extends JPanel {
                                                 .toUpperCase();
         }
 
-        public void showPage(String item) {
-                currentPage = item;
+        /**
+         * Opens a page. "Page::Filter" (e.g. "All Requests::Declined") also preselects
+         * a status filter, so dashboard counters open the matching filtered list.
+         */
+        public void showPage(String target) {
+                currentPage = target;
+                String item = target;
+                pageFilter = null;
+                int split = target.indexOf("::");
+                if (split >= 0) {
+                        item = target.substring(0, split);
+                        pageFilter = target.substring(split + 2);
+                }
                 String title = pageTitleFor(item);
                 pageTitle.setText(title);
                 pageDescription.setText(pageDescriptionFor(item));
                 setActiveNavigation(navigationItemFor(item));
                 pageContainer.removeAll();
+                currentContent = createPage(item);
+                lastReload = System.currentTimeMillis();
                 pageContainer.add(new src.ui.components.FadeInPanel(
-                                UiSupport.scroll(createPage(item))), BorderLayout.CENTER);
+                                UiSupport.scroll(currentContent)), BorderLayout.CENTER);
                 pageContainer.revalidate();
                 pageContainer.repaint();
         }
@@ -388,7 +413,8 @@ public class MainLayout extends JPanel {
                                                         user.getUserId(),
                                                         requestController,
                                                         this::editRequest,
-                                                        this::refreshCurrentPage);
+                                                        this::refreshCurrentPage,
+                                                        pageFilter);
                                 }
                                 return infoPage(item, "This page is available to borrower accounts.");
                         case "Pending Requests":
@@ -418,7 +444,9 @@ public class MainLayout extends JPanel {
                                                 this::refreshCurrentPage,
                                                 enabled -> notificationsEnabled = enabled);
                         case "Notifications":
-                                return new NotificationsPanel(user.getUserId(), notificationController);
+                                return new NotificationsPanel(
+                                                user, notificationController, requestController,
+                                                this::refreshNotificationBadge);
                         case "Available Equipment":
                                 return new EquipmentInventoryPanel(
                                                 user, equipmentController, this::requestItems);
@@ -461,9 +489,15 @@ public class MainLayout extends JPanel {
                                 }
                                 return infoPage(item, "This page is available to the campus director.");
                         case "All Requests":
+                                if (isBorrower()) {
+                                        return new MyRequestsPanel(
+                                                        user.getUserId(), requestController,
+                                                        this::editRequest, this::refreshCurrentPage,
+                                                        pageFilter);
+                                }
                                 return new RequestQueuePanel(
                                                 user, requestController,
-                                                RequestQueuePanel.Mode.ALL_REQUESTS);
+                                                RequestQueuePanel.Mode.ALL_REQUESTS, pageFilter);
                         case "Password Requests":
                                 if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
                                         return new PasswordResetRequestsPanel(user, authController);
@@ -579,6 +613,9 @@ public class MainLayout extends JPanel {
         }
 
         private String navigationItemFor(String page) {
+                if (user != null && isBorrower() && "All Requests".equals(page)) {
+                        return "My Requests";
+                }
                 if ("Pending Requests".equals(page) || "Borrowed Requests".equals(page)) {
                         return "My Requests";
                 }
@@ -649,6 +686,116 @@ public class MainLayout extends JPanel {
 
         public JPanel getPageContainer() {
                 return pageContainer;
+        }
+
+        private void startLiveSync() {
+                if (user == null || notificationController == null) {
+                        return;
+                }
+                refreshNotificationBadge();
+                liveSyncTimer = new javax.swing.Timer(LIVE_SYNC_MS, event -> pollForChanges());
+                liveSyncTimer.setRepeats(true);
+                liveSyncTimer.start();
+        }
+
+        /** Reloads the visible page in place when requests or notifications changed. */
+        private void pollForChanges() {
+                if (syncing || !isShowing()) {
+                        return;
+                }
+                syncing = true;
+                boolean sweep = System.currentTimeMillis() - lastOverdueSweep > OVERDUE_SWEEP_MS;
+                new javax.swing.SwingWorker<Object[], Void>() {
+                        @Override
+                        protected Object[] doInBackground() throws Exception {
+                                if (sweep) {
+                                        try {
+                                                notificationController.runOverdueSweep();
+                                        } catch (Exception ignored) {
+                                                // The sweep is retried on the next cycle.
+                                        }
+                                }
+                                return new Object[] {
+                                                notificationController.changeToken(user.getUserId()),
+                                                notificationController.countUnread(user.getUserId())
+                                };
+                        }
+
+                        @Override
+                        protected void done() {
+                                syncing = false;
+                                if (sweep) {
+                                        lastOverdueSweep = System.currentTimeMillis();
+                                }
+                                try {
+                                        Object[] result = get();
+                                        String token = (String) result[0];
+                                        updateNotificationButton((Integer) result[1]);
+                                        boolean changed = lastChangeToken != null
+                                                        && !lastChangeToken.equals(token);
+                                        boolean stale = System.currentTimeMillis() - lastReload
+                                                        > TIME_REFRESH_MS;
+                                        lastChangeToken = token;
+                                        if ((changed || stale)
+                                                        && currentContent instanceof src.ui.Refreshable) {
+                                                lastReload = System.currentTimeMillis();
+                                                ((src.ui.Refreshable) currentContent).reloadData();
+                                        }
+                                } catch (Exception ignored) {
+                                        // Database briefly unavailable; try again next cycle.
+                                }
+                        }
+                }.execute();
+        }
+
+        private void refreshNotificationBadge() {
+                if (user == null || notificationController == null) {
+                        return;
+                }
+                new javax.swing.SwingWorker<Integer, Void>() {
+                        @Override
+                        protected Integer doInBackground() throws Exception {
+                                return notificationController.countUnread(user.getUserId());
+                        }
+
+                        @Override
+                        protected void done() {
+                                try {
+                                        updateNotificationButton(get());
+                                } catch (Exception ignored) {
+                                }
+                        }
+                }.execute();
+        }
+
+        private void updateNotificationButton(int unread) {
+                if (notificationButton == null) {
+                        return;
+                }
+                notificationButton.setText(unread > 0
+                                ? "Notifications (" + (unread > 99 ? "99+" : unread) + ")"
+                                : "Notifications");
+                notificationButton.setToolTipText(unread > 0
+                                ? unread + " unread notification(s)" : "Open notifications");
+        }
+
+        @Override
+        public void addNotify() {
+                super.addNotify();
+                if (liveSyncTimer != null && !liveSyncTimer.isRunning()) {
+                        liveSyncTimer.start();
+                }
+        }
+
+        @Override
+        public void removeNotify() {
+                if (liveSyncTimer != null) {
+                        liveSyncTimer.stop();
+                }
+                if (reminderTimer != null) {
+                        reminderTimer.stop();
+                }
+                super.removeNotify();
         }
 
         private boolean isApprover() {

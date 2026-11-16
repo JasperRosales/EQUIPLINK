@@ -55,15 +55,22 @@ public final class UiSupport {
         }
         switch (status) {
             case "RELEASED":
-            case "ASSIGNED":
+            case "PARTIALLY_RELEASED":
+            case "FULLY_RELEASED":
                 return AppTheme.primary();
+            case "ASSIGNED":
             case "APPROVED":
+            case "PARTIALLY_APPROVED":
+            case "FULLY_APPROVED":
             case "COMPLETED":
             case "RETURNED":
                 return AppTheme.success();
             case "UNABLE":
             case "REJECTED":
+            case "DECLINED":
             case "CANCELLED":
+            case "NOT_ASSIGNED":
+            case "NOT_PROCESSED":
                 return AppTheme.danger();
             case "NEEDS_ACTION":
                 return AppTheme.warning();
@@ -85,6 +92,15 @@ public final class UiSupport {
         if ("PENDING_DIRECTOR".equals(status)) {
             return "Director review";
         }
+        if ("REJECTED".equals(status)) {
+            return "Declined";
+        }
+        if ("NOT_ASSIGNED".equals(status)) {
+            return "Not Assigned";
+        }
+        if ("NOT_PROCESSED".equals(status)) {
+            return "Not Processed on Time";
+        }
         if ("UNABLE".equals(status)) {
             return "Unable to fulfill";
         }
@@ -103,6 +119,77 @@ public final class UiSupport {
             text.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
         }
         return text.toString();
+    }
+
+    /** Label for one department's own status (ASSIGNED reads as "Approved"). */
+    public static String departmentStatus(String status) {
+        if (status == null) {
+            return "Not involved";
+        }
+        switch (status) {
+            case "PENDING":
+                return "Pending";
+            case "ASSIGNED":
+                return "Approved";
+            case "RELEASED":
+                return "Released";
+            case "RETURNED":
+                return "Returned";
+            default:
+                return displayStatus(status);
+        }
+    }
+
+    public static java.awt.Color departmentStatusColor(String status) {
+        if ("RELEASED".equals(status)) {
+            return AppTheme.primary();
+        }
+        return statusColor(status);
+    }
+
+    /**
+     * Row of badges: overall status, review stage when relevant, and each
+     * department's own decision (unless the view is limited to one department).
+     */
+    public static javax.swing.JPanel statusBadges(
+            src.model.BorrowRequest request, String scopeRole, boolean showDepartments) {
+        javax.swing.JPanel badges = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+        badges.setOpaque(false);
+        if (request.isPriority()) {
+            badges.add(new src.ui.components.StatusBadge(
+                    "Faculty · Priority", AppTheme.isDarkMode()
+                            ? new java.awt.Color(196, 181, 253) : new java.awt.Color(124, 58, 237)));
+        }
+        if (showDepartments) {
+            for (String role : new String[] { src.model.RequestStatus.ICT,
+                    src.model.RequestStatus.FACILITY }) {
+                if (scopeRole != null && !scopeRole.equalsIgnoreCase(role)) {
+                    continue;
+                }
+                String status = src.model.RequestStatus.department(request, role);
+                if (status == null) {
+                    continue;
+                }
+                badges.add(new src.ui.components.StatusBadge(
+                        src.model.RequestStatus.departmentLabel(role) + ": "
+                                + departmentStatus(status),
+                        departmentStatusColor(status)));
+            }
+        }
+        String stage = request.getStatus();
+        if ("PENDING_ADMIN".equals(stage) || "PENDING_DIRECTOR".equals(stage)) {
+            badges.add(new src.ui.components.StatusBadge(stage));
+        }
+        badges.add(new src.ui.components.StatusBadge(request.getOverallStatus(scopeRole)));
+        return badges;
+    }
+
+    /** "09:00 AM – 10:00 AM" style time range. */
+    public static String timeRange(java.time.LocalTime start, java.time.LocalTime end) {
+        java.time.format.DateTimeFormatter format = java.time.format.DateTimeFormatter
+                .ofPattern("hh:mm a", java.util.Locale.ENGLISH);
+        return start.format(format) + " – " + end.format(format);
     }
 
     /** Keeps page content at its preferred height and tracks the viewport width. */

@@ -27,10 +27,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-public class NotificationsPanel extends JPanel {
+public class NotificationsPanel extends JPanel implements Refreshable {
 
     private final long userId;
+    private final src.model.User user;
     private final NotificationController notificationController;
+    private final src.controller.BorrowRequestController requestController;
+    private final Runnable onChanged;
+    private final PrimaryButton deleteAll = new PrimaryButton(
+            "Delete all", PrimaryButton.Style.DANGER);
     private final JPanel notificationList = new JPanel();
     private final PrimaryButton markAllRead = new PrimaryButton(
             "Mark all read", PrimaryButton.Style.SECONDARY);
@@ -42,15 +47,35 @@ public class NotificationsPanel extends JPanel {
     private List<Notification> notifications = List.of();
 
     public NotificationsPanel(long userId, NotificationController notificationController) {
+        this(null, userId, notificationController, null, null);
+    }
+
+    public NotificationsPanel(
+            src.model.User user,
+            NotificationController notificationController,
+            src.controller.BorrowRequestController requestController,
+            Runnable onChanged) {
+        this(user, user.getUserId(), notificationController, requestController, onChanged);
+    }
+
+    private NotificationsPanel(
+            src.model.User user,
+            long userId,
+            NotificationController notificationController,
+            src.controller.BorrowRequestController requestController,
+            Runnable onChanged) {
+        this.user = user;
         this.userId = userId;
         this.notificationController = notificationController;
+        this.requestController = requestController;
+        this.onChanged = onChanged == null ? () -> { } : onChanged;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(AppTheme.background());
         setBorder(new EmptyBorder(2, 2, 22, 2));
         JLabel heading = new JLabel("Your notifications");
         heading.setFont(AppTheme.semibold(18));
         heading.setForeground(AppTheme.foreground());
-        JLabel subtitle = new JLabel("Request updates and account activity.");
+        JLabel subtitle = new JLabel("Request updates and account activity. Click a notification for full details.");
         subtitle.setFont(AppTheme.regular(11));
         subtitle.setForeground(AppTheme.muted());
         JPanel pageHeader = new JPanel(new BorderLayout(8, 8));
@@ -65,6 +90,8 @@ public class NotificationsPanel extends JPanel {
         actions.setOpaque(false);
         markAllRead.addActionListener(event -> markAllNotificationsRead());
         actions.add(markAllRead);
+        deleteAll.addActionListener(event -> deleteAllNotifications());
+        actions.add(deleteAll);
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
         refresh.addActionListener(event -> reload());
         actions.add(refresh);
@@ -114,10 +141,21 @@ public class NotificationsPanel extends JPanel {
         combo.setPreferredSize(new Dimension(width, 40));
     }
 
+    @Override
+    public void reloadData() {
+        reload(true);
+    }
+
     private void reload() {
-        notificationList.removeAll();
-        notificationList.add(message("Loading notifications…", false));
-        notificationList.revalidate();
+        reload(false);
+    }
+
+    private void reload(boolean quiet) {
+        if (!quiet) {
+            notificationList.removeAll();
+            notificationList.add(message("Loading notifications…", false));
+            notificationList.revalidate();
+        }
         new SwingWorker<List<Notification>, Void>() {
             @Override
             protected List<Notification> doInBackground() throws Exception {
@@ -167,6 +205,7 @@ public class NotificationsPanel extends JPanel {
         notificationList.removeAll();
         long unread = notifications.stream().filter(n -> !n.isRead()).count();
         markAllRead.setEnabled(unread > 0);
+        deleteAll.setEnabled(!notifications.isEmpty());
         List<Notification> filtered = filteredNotifications();
         JPanel summary = new JPanel(new BorderLayout());
         summary.setOpaque(false);
@@ -208,7 +247,9 @@ public class NotificationsPanel extends JPanel {
             }
             if (!query.isEmpty()) {
                 String haystack = (safe(n.getTitle()) + " " + safe(n.getMessage()) + " "
-                        + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()))
+                        + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()) + " "
+                        + safe(n.getRequestCode()) + " "
+                        + src.model.RequestStatus.departmentLabel(n.getDepartment()))
                         .toLowerCase(Locale.ROOT);
                 if (!haystack.contains(query)) {
                     continue;
@@ -288,14 +329,18 @@ public class NotificationsPanel extends JPanel {
         card.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override public void mouseEntered(java.awt.event.MouseEvent e) { if (!hoverTimer.isRunning()) hoverTimer.start(); }
             @Override public void mouseExited(java.awt.event.MouseEvent e) { if (!hoverTimer.isRunning()) hoverTimer.start(); }
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) { openDetails(notification); }
         });
+        card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        card.setToolTipText("Click to view full details");
         card.setLayout(new BorderLayout(12, 5));
         JPanel body = new JPanel();
         body.setOpaque(false);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         JLabel title = new JLabel(notification.getTitle());
         title.setFont(AppTheme.semibold(12));
-        title.setForeground(AppTheme.foreground());
+        // Unread notifications use the accent color so they stand out from read ones.
+        title.setForeground(notification.isRead() ? AppTheme.foreground() : AppTheme.primary());
         StringBuilder content = new StringBuilder();
         if (notification.getMessage() != null) {
             content.append(escape(notification.getMessage()));
@@ -316,7 +361,10 @@ public class NotificationsPanel extends JPanel {
                 : notification.getCreatedAt().format(
                         DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a")) + " (PHT)";
         String req = notification.getRequestId() == null
-                ? "" : "  ·  Request #" + notification.getRequestId();
+                ? "" : "  ·  Request " + requestLabel(notification);
+        if (notification.getDepartment() != null) {
+            req += "  ·  " + src.model.RequestStatus.departmentLabel(notification.getDepartment());
+        }
         if (notification.getEventDate() != null) {
             req += "  ·  Event " + notification.getEventDate().format(
                     DateTimeFormatter.ofPattern("MMM d, yyyy"));
@@ -330,7 +378,7 @@ public class NotificationsPanel extends JPanel {
         body.add(Box.createVerticalStrut(6));
         body.add(time);
 
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         actions.setOpaque(false);
         if (!notification.isRead()) {
             PrimaryButton markRead = new PrimaryButton("Mark read", PrimaryButton.Style.SECONDARY);
@@ -342,9 +390,106 @@ public class NotificationsPanel extends JPanel {
             read.setForeground(AppTheme.success());
             actions.add(read);
         }
+        PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
+        delete.setToolTipText("Remove this notification from your list");
+        delete.addActionListener(event -> deleteNotification(notification));
+        actions.add(delete);
         card.add(body, BorderLayout.CENTER);
         card.add(actions, BorderLayout.EAST);
         return card;
+    }
+
+    private String requestLabel(Notification notification) {
+        return notification.getRequestCode() != null
+                ? notification.getRequestCode() : "#" + notification.getRequestId();
+    }
+
+    /** Shows the full notification, marking it read as soon as it is opened. */
+    private void openDetails(Notification notification) {
+        if (!notification.isRead()) {
+            runInBackground(() -> notificationController.markRead(
+                    userId, notification.getNotificationId()), "Unable to update notification");
+        }
+        java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(this);
+        NotificationDetailsDialog dialog = new NotificationDetailsDialog(
+                owner, notification,
+                notification.getRequestId() != null && requestController != null && user != null
+                        ? () -> openRequest(notification.getRequestId()) : null,
+                () -> deleteNotification(notification));
+        dialog.setVisible(true);
+    }
+
+    private void openRequest(long requestId) {
+        new SwingWorker<src.model.BorrowRequest, Void>() {
+            @Override
+            protected src.model.BorrowRequest doInBackground() throws Exception {
+                return requestController.findRequestForUser(user, requestId);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String role = user.getRole() == null ? "" : user.getRole().toUpperCase();
+                    String scope = "ICT_STAFF".equals(role) || "FACILITY_STAFF".equals(role)
+                            ? role : null;
+                    new RequestDetailsDialog(
+                            javax.swing.SwingUtilities.getWindowAncestor(NotificationsPanel.this),
+                            get(), scope).setVisible(true);
+                } catch (Exception exception) {
+                    Throwable cause = exception.getCause() == null
+                            ? exception : exception.getCause();
+                    JOptionPane.showMessageDialog(NotificationsPanel.this,
+                            cause.getMessage(), "Request unavailable",
+                            JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void deleteNotification(Notification notification) {
+        runInBackground(() -> notificationController.delete(
+                userId, notification.getNotificationId()), "Unable to delete notification");
+    }
+
+    private void deleteAllNotifications() {
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Delete all " + notifications.size() + " notifications?\n"
+                        + "Your requests, approvals, releases, and history are not affected.",
+                "Delete all notifications", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (answer == JOptionPane.YES_OPTION) {
+            runInBackground(() -> notificationController.deleteAll(userId),
+                    "Unable to delete notifications");
+        }
+    }
+
+    private void runInBackground(ThrowingAction action, String errorTitle) {
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                action.run();
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    reload(true);
+                    onChanged.run();
+                } catch (Exception exception) {
+                    Throwable cause = exception.getCause() == null
+                            ? exception : exception.getCause();
+                    JOptionPane.showMessageDialog(NotificationsPanel.this,
+                            cause.getMessage(), errorTitle, JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    @FunctionalInterface
+    private interface ThrowingAction {
+        void run() throws Exception;
     }
 
     private void markRead(Notification notification) {
@@ -359,7 +504,8 @@ public class NotificationsPanel extends JPanel {
             protected void done() {
                 try {
                     get();
-                    reload();
+                    reload(true);
+                    onChanged.run();
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
@@ -386,7 +532,8 @@ public class NotificationsPanel extends JPanel {
             protected void done() {
                 try {
                     get();
-                    reload();
+                    reload(true);
+                    onChanged.run();
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
