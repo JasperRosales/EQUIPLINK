@@ -277,6 +277,85 @@ public final class DatabaseInitializer {
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_request_groups_occ_role ON request_groups(occurrence_id, custodian_role) WHERE occurrence_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_occurrences_request ON request_occurrences(request_id, event_date, start_time)",
 
+            /*
+             * LEGACY CLEANUP: the earlier work-in-progress schema tracked schedules in
+             * request_schedules and required request_items.schedule_id. The current
+             * code uses request_occurrences instead, so carry the old schedules over
+             * and then remove the obsolete column. This block is idempotent and is a
+             * no-op on databases created with the current schema.
+             */
+            """
+                    DO $$
+                    DECLARE
+                        legacy_schedules BOOLEAN;
+                        legacy_column BOOLEAN;
+                    BEGIN
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'public'
+                              AND table_name = 'request_schedules'
+                        ) INTO legacy_schedules;
+
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'request_items'
+                              AND column_name = 'schedule_id'
+                        ) INTO legacy_column;
+
+                        IF legacy_schedules THEN
+                            INSERT INTO request_occurrences (
+                                request_id, event_date, start_time, end_time, venue
+                            )
+                            SELECT rs.request_id, rs.event_date, rs.start_time,
+                                   rs.end_time, br.venue
+                            FROM request_schedules rs
+                            JOIN borrow_requests br ON br.request_id = rs.request_id
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM request_occurrences ro
+                                WHERE ro.request_id = rs.request_id
+                                  AND ro.event_date = rs.event_date
+                                  AND ro.start_time = rs.start_time
+                                  AND ro.end_time = rs.end_time
+                            );
+
+                            IF legacy_column THEN
+                                UPDATE request_items ri
+                                SET occurrence_id = ro.occurrence_id
+                                FROM request_schedules rs
+                                JOIN request_occurrences ro
+                                  ON ro.request_id = rs.request_id
+                                 AND ro.event_date = rs.event_date
+                                 AND ro.start_time = rs.start_time
+                                 AND ro.end_time = rs.end_time
+                                WHERE ri.schedule_id = rs.schedule_id
+                                  AND ri.occurrence_id IS NULL;
+
+                                UPDATE request_groups rg
+                                SET occurrence_id = ro.occurrence_id
+                                FROM request_occurrences ro
+                                WHERE rg.request_id = ro.request_id
+                                  AND rg.occurrence_id IS NULL
+                                  AND (
+                                      SELECT COUNT(*) FROM request_occurrences x
+                                      WHERE x.request_id = rg.request_id
+                                  ) = 1
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM request_groups other
+                                      WHERE other.occurrence_id = ro.occurrence_id
+                                        AND other.custodian_role = rg.custodian_role
+                                        AND other.group_id <> rg.group_id
+                                  );
+                            END IF;
+                        END IF;
+
+                        IF legacy_column THEN
+                            ALTER TABLE request_items
+                                DROP COLUMN IF EXISTS schedule_id;
+                        END IF;
+                    END $$;
+                    """,
+
 
             // Independent department (ICT / Facility) decisions
             "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS declined_by BIGINT REFERENCES users(user_id)",
