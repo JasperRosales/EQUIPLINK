@@ -41,6 +41,8 @@ public class NotificationsPanel extends JPanel implements Refreshable {
             "Mark all read", PrimaryButton.Style.SECONDARY);
     private final JTextField search = new JTextField(18);
     private final JComboBox<String> categoryFilter = new JComboBox<>(new String[] { "All categories" });
+    private final JComboBox<String> kindFilter = new JComboBox<>(
+            new String[] { "All kinds", "Request", "Borrowing & Returns", "Account" });
     private final JComboBox<String> readFilter = new JComboBox<>(new String[] { "All", "Unread", "Read" });
     private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first", "Category" });
     private final DateFilter dateFilter = new DateFilter();
@@ -121,13 +123,16 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         tools.setOpaque(false);
         styleCombo(categoryFilter, 150);
+        styleCombo(kindFilter, 150);
         styleCombo(readFilter, 110);
         styleCombo(dateSort, 140);
         categoryFilter.addActionListener(event -> showNotifications());
+        kindFilter.addActionListener(event -> showNotifications());
         readFilter.addActionListener(event -> showNotifications());
         dateSort.addActionListener(event -> showNotifications());
         dateFilter.addChangeListener(this::showNotifications);
         tools.add(categoryFilter);
+        tools.add(kindFilter);
         tools.add(readFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
@@ -235,6 +240,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
     private List<Notification> filteredNotifications() {
         String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
         String selectedCategory = String.valueOf(categoryFilter.getSelectedItem());
+        String selectedKind = String.valueOf(kindFilter.getSelectedItem());
         String selectedRead = String.valueOf(readFilter.getSelectedItem());
         int sortMode = dateSort.getSelectedIndex();
         List<Notification> filtered = new ArrayList<>();
@@ -248,12 +254,17 @@ public class NotificationsPanel extends JPanel implements Refreshable {
             if (!query.isEmpty()) {
                 String haystack = (safe(n.getTitle()) + " " + safe(n.getMessage()) + " "
                         + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()) + " "
+                        + safe(n.getCategoryLabel()) + " "
                         + safe(n.getRequestCode()) + " "
                         + src.model.RequestStatus.departmentLabel(n.getDepartment()))
                         .toLowerCase(Locale.ROOT);
                 if (!haystack.contains(query)) {
                     continue;
                 }
+            }
+            if (!"All kinds".equals(selectedKind)
+                    && !n.getCategoryLabel().equals(selectedKind)) {
+                continue;
             }
             if (selectedCategory != null && !"All categories".equals(selectedCategory)) {
                 boolean match = splitValues(n.getRequestCategories()).stream()
@@ -270,7 +281,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         }
         Comparator<Notification> cmp;
         if (sortMode == 2) {
-            cmp = Comparator.comparing((Notification n) -> safe(n.getRequestCategories()).toLowerCase(Locale.ROOT))
+            cmp = Comparator.comparing((Notification n) -> n.getCategoryLabel().toLowerCase(Locale.ROOT))
                     .thenComparing(Comparator.comparing(Notification::getCreatedAt,
                             Comparator.nullsLast(Comparator.naturalOrder())).reversed());
         } else {
@@ -341,6 +352,13 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         title.setFont(AppTheme.semibold(12));
         // Unread notifications use the accent color so they stand out from read ones.
         title.setForeground(notification.isRead() ? AppTheme.foreground() : AppTheme.primary());
+        JLabel kind = new JLabel(notification.getCategoryLabel());
+        kind.setFont(AppTheme.semibold(9.5f));
+        kind.setForeground(AppTheme.primary());
+        JPanel titleRow = new JPanel(new BorderLayout(8, 0));
+        titleRow.setOpaque(false);
+        titleRow.add(title, BorderLayout.CENTER);
+        titleRow.add(kind, BorderLayout.EAST);
         StringBuilder content = new StringBuilder();
         if (notification.getMessage() != null) {
             content.append(escape(notification.getMessage()));
@@ -372,7 +390,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         JLabel time = new JLabel("Created " + created + req);
         time.setFont(AppTheme.regular(10.5f));
         time.setForeground(AppTheme.muted());
-        body.add(title);
+        body.add(titleRow);
         body.add(Box.createVerticalStrut(5));
         body.add(message);
         body.add(Box.createVerticalStrut(6));

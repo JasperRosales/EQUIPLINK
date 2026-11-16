@@ -516,6 +516,32 @@ public class AuthService {
                 return users;
             }
 
+            public void deleteBorrowerAccount(String actorRole, long userId)
+                    throws Exception {
+                requireIctStaff(actorRole);
+                if (userId <= 0) {
+                    throw new IllegalArgumentException("Invalid borrower account.");
+                }
+
+                try (Connection connection = Database.getConnection();
+                        PreparedStatement statement = connection.prepareStatement(
+                                "DELETE FROM users WHERE user_id = ? AND role = 'BORROWER'")) {
+                    statement.setLong(1, userId);
+                    if (statement.executeUpdate() == 0) {
+                        throw new IllegalArgumentException(
+                                "This borrower account no longer exists.");
+                    }
+                } catch (java.sql.SQLException exception) {
+                    if ("23503".equals(exception.getSQLState())) {
+                        throw new IllegalStateException(
+                                "This account is linked to existing requests or records and "
+                                        + "cannot be deleted without removing that history.",
+                                exception);
+                    }
+                    throw exception;
+                }
+            }
+
             private void requireIctStaff(String actorRole) {
                 if (!"ICT_STAFF".equalsIgnoreCase(actorRole == null ? "" : actorRole.trim())) {
                     throw new SecurityException("Only ICT system administrators can manage this.");

@@ -194,9 +194,63 @@ public class UserManagementPanel extends JPanel {
         JLabel status = new JLabel(user.isActive() ? "ACTIVE" : "INACTIVE");
         status.setFont(AppTheme.semibold(10.5f));
         status.setForeground(user.isActive() ? AppTheme.success() : AppTheme.danger());
+        src.ui.components.PrimaryButton delete =
+                new src.ui.components.PrimaryButton(
+                        "Delete", src.ui.components.PrimaryButton.Style.DANGER);
+        delete.addActionListener(event -> deleteBorrowerAccount(user, delete));
+        JPanel actions = new JPanel();
+        actions.setOpaque(false);
+        actions.setLayout(new BoxLayout(actions, BoxLayout.Y_AXIS));
+        status.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
+        delete.setAlignmentX(java.awt.Component.RIGHT_ALIGNMENT);
+        actions.add(status);
+        actions.add(Box.createVerticalStrut(6));
+        actions.add(delete);
         card.add(detail, BorderLayout.CENTER);
-        card.add(status, BorderLayout.EAST);
+        card.add(actions, BorderLayout.EAST);
         return card;
+    }
+
+    private void deleteBorrowerAccount(
+            User user, src.ui.components.PrimaryButton deleteButton) {
+        int answer = javax.swing.JOptionPane.showConfirmDialog(
+                this,
+                "Permanently delete " + user.getFullName() + " ("
+                        + user.getUsername() + ")?\n\n"
+                        + "Existing requests and related history are preserved, so an account "
+                        + "with linked records cannot be deleted.",
+                "Delete borrower account",
+                javax.swing.JOptionPane.YES_NO_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (answer != javax.swing.JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        deleteButton.setEnabled(false);
+        deleteButton.setText("Deleting...");
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                authController.deleteBorrowerAccount(actor, user.getUserId());
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    loadUsers();
+                } catch (Exception exception) {
+                    deleteButton.setEnabled(true);
+                    deleteButton.setText("Delete");
+                    javax.swing.JOptionPane.showMessageDialog(
+                            UserManagementPanel.this,
+                            messageOf(exception),
+                            "Unable to delete account",
+                            javax.swing.JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void createFacultyAccount() {

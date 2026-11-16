@@ -17,6 +17,7 @@ import java.awt.GridLayout;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.TemporalAdjusters;
@@ -32,6 +33,7 @@ public class DateFilter extends PrimaryButton {
 
     private static final DateTimeFormatter SHORT = DateTimeFormatter.ofPattern("MMM d");
     private static final DateTimeFormatter LONG = DateTimeFormatter.ofPattern("MMM d, yyyy");
+    private static final ZoneId MANILA = ZoneId.of("Asia/Manila");
 
     private final List<Runnable> listeners = new ArrayList<>();
     private final JPopupMenu popup = new JPopupMenu();
@@ -42,8 +44,13 @@ public class DateFilter extends PrimaryButton {
     private LocalDate from;
     private LocalDate to;
     private LocalDate pendingStart;
-    private YearMonth shownMonth = YearMonth.now();
+    private YearMonth shownMonth = YearMonth.from(today());
     private String label = "All dates";
+
+    /** Today in Philippine time (Asia/Manila, UTC+8), independent of the PC clock zone. */
+    public static LocalDate today() {
+        return LocalDate.now(MANILA);
+    }
 
     public DateFilter() {
         super("All dates", Style.SECONDARY);
@@ -53,7 +60,7 @@ public class DateFilter extends PrimaryButton {
         setToolTipText("Filter by date");
         buildPopup();
         addActionListener(event -> {
-            shownMonth = from == null ? YearMonth.now() : YearMonth.from(from);
+            shownMonth = from == null ? YearMonth.from(today()) : YearMonth.from(from);
             pendingStart = null;
             hint.setText("Click a day, or two days for a range.");
             renderMonth();
@@ -92,7 +99,7 @@ public class DateFilter extends PrimaryButton {
 
         JPanel presets = new JPanel(new GridLayout(0, 1, 0, 2));
         presets.setOpaque(false);
-        LocalDate today = LocalDate.now();
+        LocalDate today = today();
         addPreset(presets, "All dates", null, null);
         addPreset(presets, "Today", today, today);
         addPreset(presets, "Next 7 days", today, today.plusDays(6));
@@ -181,7 +188,7 @@ public class DateFilter extends PrimaryButton {
         for (int i = 0; i < offset; i++) {
             grid.add(new JLabel());
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = today();
         for (int d = 1; d <= shownMonth.lengthOfMonth(); d++) {
             LocalDate date = shownMonth.atDay(d);
             JButton cell = new JButton(String.valueOf(d));
