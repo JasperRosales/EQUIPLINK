@@ -1,0 +1,30 @@
+#Rooms
+- Room 201
+- Room 202
+- Room 203
+- Room 204
+- Room 205
+- Room 206
+- Room 207
+- Room 208
+- Room 209
+- Room 210
+- Physics Lab
+- Chemistry Lab
+- Computer Laboratory
+- Internet Laboratory
+- AVR
+- 4th Floor
+- EEB 02
+- EEB 04
+- RGR 04
+- RGR 05
+- RGR 06
+- Nurse Office
+- OGC Office
+- OJT Office
+- Testing Admission Office 
+- Cashiering Office
+- OSD Office
+- Registrar Office
+

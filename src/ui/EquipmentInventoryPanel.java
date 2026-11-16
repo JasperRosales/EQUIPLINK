@@ -333,7 +333,7 @@ public class EquipmentInventoryPanel extends JPanel {
                 java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create();
                 g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
                         java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setColor(AppTheme.alpha(new java.awt.Color(0, 0, 128),
+                g.setColor(AppTheme.alpha(AppTheme.PRIMARY,
                         Math.round(255 * hover[0])));
                 g.setStroke(new java.awt.BasicStroke(2f));
                 int m = SurfacePanel.MARGIN;

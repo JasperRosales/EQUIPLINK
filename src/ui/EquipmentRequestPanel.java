@@ -10,6 +10,7 @@ import src.controller.BorrowRequestController;
 import src.controller.EquipmentController;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
+import src.ui.components.VenueOptions;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -57,7 +58,7 @@ public class EquipmentRequestPanel extends JPanel {
     private final JComboBox<Equipment> equipmentPicker = new JComboBox<>();
     private final JSpinner quantity = new JSpinner(
             new SpinnerNumberModel(1, 1, Integer.MAX_VALUE, 1));
-    private final JTextField venue = new JTextField();
+    private final JComboBox<String> venue = new JComboBox<>();
     private final JTextField eventDate = new JTextField();
     private final src.ui.components.TimeInput startTime = new src.ui.components.TimeInput();
     private final src.ui.components.TimeInput endTime = new src.ui.components.TimeInput();
@@ -122,30 +123,20 @@ public class EquipmentRequestPanel extends JPanel {
         position.setText("Borrower");
         purpose.setLineWrap(true);
         purpose.setWrapStyleWord(true);
-        venue.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            private boolean adjusting;
-            private void upper() {
-                if (adjusting) return;
-                String t = venue.getText();
-                String u = t == null ? "" : t.toUpperCase(Locale.ROOT);
-                if (!u.equals(t)) {
-                    adjusting = true;
-                    try {
-                        int pos = venue.getCaretPosition();
-                        venue.setText(u);
-                        venue.setCaretPosition(Math.min(pos, u.length()));
-                    } finally {
-                        adjusting = false;
-                    }
-                }
-            }
-            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { upper(); }
-            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { upper(); }
-            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { upper(); }
-        });
+        for (String room : VenueOptions.load()) {
+            venue.addItem(room);
+        }
+        venue.setEditable(true);
+        venue.setToolTipText("Choose a room, or type a different venue name");
+        venue.setSelectedIndex(-1);
+        venue.getEditor().setItem("");
+        if (venue.getEditor().getEditorComponent() instanceof JTextField editor) {
+            editor.putClientProperty("JTextField.placeholderText",
+                    "Choose a room or type a venue");
+        }
 
         if (existingRequest != null) {
-            venue.setText(existingRequest.getVenue() == null ? ""
+            venue.setSelectedItem(existingRequest.getVenue() == null ? ""
                     : existingRequest.getVenue().toUpperCase());
             eventDate.setText(existingRequest.getEventDate().toString());
             DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
@@ -167,8 +158,15 @@ public class EquipmentRequestPanel extends JPanel {
         } else if (facultyMonthly) {
             // start with one empty schedule row prefilled from fields after init
             scheduleRows.add(new ScheduleRow(LocalDate.now().plusDays(1), LocalTime.of(9,0), LocalTime.of(10,0),
-                    venue.getText() == null ? "" : venue.getText()));
+                    venueText()));
         }
+    }
+
+    /** The editable venue picker's current text, whether picked or typed manually. */
+    private String venueText() {
+        Object value = venue.isEditable()
+                ? venue.getEditor().getItem() : venue.getSelectedItem();
+        return value == null ? "" : value.toString().trim();
     }
 
     private void buildForm() {
@@ -483,7 +481,7 @@ public class EquipmentRequestPanel extends JPanel {
 
     private void addScheduleFromFields() {
         try {
-            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            String v = venueText().toUpperCase(Locale.ROOT);
             LocalDate d = LocalDate.parse(eventDate.getText().trim());
             LocalTime st = parseTime(startTime.getText());
             LocalTime et = parseTime(endTime.getText());
@@ -572,7 +570,7 @@ public class EquipmentRequestPanel extends JPanel {
     private void saveRequest() {
         BorrowRequestForm form;
         try {
-            String v = venue.getText() == null ? "" : venue.getText().trim().toUpperCase(Locale.ROOT);
+            String v = venueText().toUpperCase(Locale.ROOT);
             LocalDate d = LocalDate.parse(eventDate.getText().trim());
             LocalTime st = parseTime(startTime.getText());
             LocalTime et = parseTime(endTime.getText());

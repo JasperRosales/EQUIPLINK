@@ -288,7 +288,7 @@ public class ForgotPasswordDialog extends JDialog {
                     0, 0,
                     new Color(255, 255, 255),
                     0, height,
-                    new Color(237, 243, 251)
+                    new Color(240, 247, 247)
             );
 
             g2.setPaint(gradient);
@@ -322,7 +322,7 @@ public class ForgotPasswordDialog extends JDialog {
 
             // Bottom inset shadow
             g2.setColor(
-                    new Color(170, 190, 218, 85)
+                    new Color(120, 160, 168, 85)
             );
 
             g2.drawLine(
@@ -389,7 +389,7 @@ public class ForgotPasswordDialog extends JDialog {
                     0, 0,
                     new Color(255, 255, 255),
                     0, height,
-                    new Color(237, 243, 251)
+                    new Color(240, 247, 247)
             );
 
             g2.setPaint(gradient);
@@ -420,7 +420,7 @@ public class ForgotPasswordDialog extends JDialog {
             );
 
             g2.setColor(
-                    new Color(170, 190, 218, 85)
+                    new Color(120, 160, 168, 85)
             );
 
             g2.drawLine(
@@ -516,7 +516,7 @@ public class ForgotPasswordDialog extends JDialog {
                 g2.setColor(
                         primary
                                 ? AppTheme.alpha(AppTheme.PRIMARY_DARK, 100)
-                                : new Color(139, 158, 184, 100)
+                                : new Color(120, 150, 158, 100)
                 );
 
                 g2.fillRoundRect(
@@ -533,13 +533,13 @@ public class ForgotPasswordDialog extends JDialog {
 
             if (!enabled) {
 
-                top = new Color(207, 216, 229);
-                bottom = new Color(190, 202, 219);
+                top = new Color(211, 219, 220);
+                bottom = new Color(196, 206, 207);
 
             } else if (primary) {
 
                 top = hovered
-                        ? AppTheme.PRIMARY_LIGHT
+                        ? AppTheme.mix(AppTheme.PRIMARY, Color.WHITE, 0.18f)
                         : AppTheme.PRIMARY;
 
                 bottom = pressed
@@ -550,11 +550,11 @@ public class ForgotPasswordDialog extends JDialog {
 
                 top = hovered
                         ? new Color(255, 255, 255)
-                        : new Color(251, 253, 255);
+                        : new Color(247, 251, 251);
 
                 bottom = pressed
-                        ? new Color(218, 229, 245)
-                        : new Color(231, 239, 250);
+                        ? new Color(219, 233, 233)
+                        : new Color(232, 241, 241);
             }
 
             GradientPaint gradient = new GradientPaint(
@@ -577,7 +577,7 @@ public class ForgotPasswordDialog extends JDialog {
             g2.setColor(
                     primary
                             ? AppTheme.PRIMARY_DARK
-                            : new Color(211, 224, 241)
+                            : new Color(211, 226, 227)
             );
 
             g2.drawRoundRect(
@@ -757,7 +757,7 @@ public class ForgotPasswordDialog extends JDialog {
                             0, 0,
                             new Color(255, 255, 255),
                             width, height,
-                            new Color(239, 245, 253)
+                            new Color(240, 247, 247)
                     );
 
             g2.setPaint(surfaceGradient);

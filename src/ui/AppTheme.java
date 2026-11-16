@@ -10,24 +10,27 @@ import java.nio.file.Path;
 public final class AppTheme {
 
     // ---- EquipLink palette (single source of truth for every screen) ----
-    /** Brand primary: soft indigo-blue. */
-    public static final Color PRIMARY = new Color(79, 102, 235);
-    public static final Color PRIMARY_LIGHT = new Color(116, 136, 245);
-    public static final Color PRIMARY_DARK = new Color(56, 76, 200);
+    // colorhunt.co/palette/053b50176b8764ccc5eeeeee
+    /** Brand primary: deep ocean teal. */
+    public static final Color PRIMARY = new Color(0x17, 0x6B, 0x87);
+    /** Soft aqua highlight. */
+    public static final Color PRIMARY_LIGHT = new Color(0x64, 0xCC, 0xC5);
+    /** Darkest teal, used for depth and the sidebar. */
+    public static final Color PRIMARY_DARK = new Color(0x05, 0x3B, 0x50);
     /** Light-mode ink and neutrals (also used by light-only dialogs). */
-    public static final Color INK = new Color(30, 41, 66);
-    public static final Color INK_MUTED = new Color(110, 122, 148);
-    public static final Color LIGHT_BG = new Color(232, 236, 243);
-    public static final Color LIGHT_BG_DEEP = new Color(220, 226, 236);
-    public static final Color LIGHT_BORDER = new Color(207, 214, 228);
+    public static final Color INK = new Color(0x05, 0x3B, 0x50);
+    public static final Color INK_MUTED = new Color(92, 124, 134);
+    public static final Color LIGHT_BG = new Color(0xEE, 0xEE, 0xEE);
+    public static final Color LIGHT_BG_DEEP = new Color(0xE2, 0xE8, 0xE9);
+    public static final Color LIGHT_BORDER = new Color(0xD2, 0xDB, 0xDD);
 
     // Legacy aliases kept for compatibility.
     public static final Color BG = LIGHT_BG;
     public static final Color NAVY = INK;
     public static final Color BLUE = PRIMARY;
 
-    private static final Color DARK_BG = new Color(30, 35, 48);
-    private static final Color SIDEBAR = new Color(26, 31, 51);
+    private static final Color DARK_BG = new Color(0x07, 0x22, 0x2E);
+    private static final Color SIDEBAR = PRIMARY_DARK;
     private static Font regularFont;
     private static Font semiboldFont;
     private static boolean darkMode;
@@ -41,7 +44,7 @@ public final class AppTheme {
 
     /** Slightly deeper page tone, used for gradients and sunken areas. */
     public static Color backgroundDeep() {
-        return darkMode ? new Color(24, 28, 40) : LIGHT_BG_DEEP;
+        return darkMode ? new Color(0x05, 0x1B, 0x25) : LIGHT_BG_DEEP;
     }
 
     /** Neumorphic surfaces share the page color; depth comes from shadows. */
@@ -51,29 +54,29 @@ public final class AppTheme {
 
     /** Input / inset fill. */
     public static Color elevatedSurface() {
-        return darkMode ? new Color(36, 42, 58) : new Color(240, 243, 248);
+        return darkMode ? new Color(0x10, 0x32, 0x3E) : new Color(0xF6, 0xF8, 0xF8);
     }
 
     public static Color foreground() {
-        return darkMode ? new Color(236, 240, 248) : INK;
+        return darkMode ? new Color(0xEE, 0xEE, 0xEE) : INK;
     }
 
     public static Color muted() {
-        return darkMode ? new Color(160, 172, 196) : INK_MUTED;
+        return darkMode ? new Color(0x9C, 0xBB, 0xC2) : INK_MUTED;
     }
 
     public static Color border() {
-        return darkMode ? new Color(50, 58, 78) : LIGHT_BORDER;
+        return darkMode ? new Color(0x1A, 0x41, 0x50) : LIGHT_BORDER;
     }
 
     /** Top-left highlight of a neumorphic surface. */
     public static Color shadowLight() {
-        return darkMode ? new Color(50, 58, 80) : Color.WHITE;
+        return darkMode ? new Color(0x1C, 0x46, 0x55) : Color.WHITE;
     }
 
     /** Bottom-right shade of a neumorphic surface. */
     public static Color shadowDark() {
-        return darkMode ? new Color(14, 17, 25) : new Color(166, 177, 199);
+        return darkMode ? new Color(0x04, 0x18, 0x21) : new Color(0xBE, 0xC7, 0xC9);
     }
 
     public static Color primary() {
@@ -89,23 +92,23 @@ public final class AppTheme {
     }
 
     public static Color sidebarText() {
-        return new Color(205, 212, 232);
+        return new Color(0xEE, 0xEE, 0xEE);
     }
 
     public static Color sidebarMuted() {
-        return new Color(128, 140, 172);
+        return new Color(0x9C, 0xC2, 0xC6);
     }
 
     public static Color sidebarDivider() {
-        return new Color(40, 47, 72);
+        return new Color(0x1D, 0x4F, 0x63);
     }
 
     public static Color sidebarShadowLight() {
-        return new Color(38, 45, 72);
+        return new Color(0x23, 0x59, 0x6C);
     }
 
     public static Color sidebarShadowDark() {
-        return new Color(15, 18, 31);
+        return new Color(0x03, 0x24, 0x32);
     }
 
     public static Color success() {
@@ -122,7 +125,7 @@ public final class AppTheme {
 
     /** Secondary accent used in charts and stat cards. */
     public static Color accent() {
-        return new Color(139, 100, 240);
+        return PRIMARY_LIGHT;
     }
 
     public static Color alpha(Color color, int alpha) {
@@ -218,7 +221,7 @@ public final class AppTheme {
         extras.put("Table.selectionBackground", hex(alpha(PRIMARY, 255)));
         extras.put("Table.selectionForeground", "#ffffff");
         extras.put("Separator.foreground", hex(border()));
-        extras.put("ToolTip.background", hex(darkMode ? new Color(46, 53, 72) : INK));
+        extras.put("ToolTip.background", hex(darkMode ? new Color(0x12, 0x3B, 0x49) : INK));
         extras.put("ToolTip.foreground", "#ffffff");
         extras.put("Label.foreground", text);
         extras.put("CheckBox.foreground", text);

@@ -364,7 +364,7 @@ public class PasswordChangeDialog extends JDialog {
                     0, 0,
                     new Color(255, 255, 255, 245),
                     0, height,
-                    new Color(237, 244, 253, 235)
+                    new Color(240, 247, 247, 235)
             );
 
             g2.setPaint(gradient);
@@ -549,9 +549,9 @@ public class PasswordChangeDialog extends JDialog {
 
                 g2.setColor(
                         new Color(
-                                35,
-                                60,
-                                95,
+                                10,
+                                45,
+                                58,
                                 5 + i * 3
                         )
                 );
@@ -571,7 +571,7 @@ public class PasswordChangeDialog extends JDialog {
                     0, 0,
                     new Color(255, 255, 255, 242),
                     width, height,
-                    new Color(240, 247, 255, 225)
+                    new Color(240, 247, 247, 225)
             );
 
             g2.setPaint(glass);
