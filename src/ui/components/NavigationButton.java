@@ -7,7 +7,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 
-/** Sidebar entry: soft raised on hover, pressed-in with an accent bar when active. */
+/** Sidebar entry: soft raised on hover, light pill with an accent bar when active. */
 public class NavigationButton extends JButton {
 
     private static final int ARC = 14;
@@ -39,7 +39,7 @@ public class NavigationButton extends JButton {
             return;
         }
         this.active = active;
-        setForeground(active ? java.awt.Color.WHITE : AppTheme.sidebarText());
+        setForeground(active ? AppTheme.PRIMARY_DARK : AppTheme.sidebarText());
         setFont(active ? AppTheme.semibold(12.5f) : AppTheme.regular(12.5f));
         activeTween.to(active ? 1f : 0f);
         repaint();
@@ -55,9 +55,8 @@ public class NavigationButton extends JButton {
         int w = getWidth() - m * 2;
         int ht = getHeight() - m * 2;
         if (a > 0.01f) {
-            Neu.inset(g, m, m, w, ht, ARC, 3f * a, AppTheme.sidebar(),
-                    AppTheme.sidebarShadowLight(), AppTheme.sidebarShadowDark());
-            g.setColor(AppTheme.alpha(AppTheme.primary(), Math.round(40 * a)));
+            // Active tab: a light #EEEEEE pill on the dark teal sidebar.
+            g.setColor(AppTheme.alpha(AppTheme.LIGHT_BG, Math.round(255 * a)));
             g.fillRoundRect(m, m, w, ht, ARC, ARC);
             int bar = Math.round((ht - 16) * a);
             g.setColor(AppTheme.primary());
