@@ -14,6 +14,7 @@ import src.service.BorrowRequestService;
 import src.service.EquipmentService;
 import src.service.NotificationService;
 import src.ui.LoginFrame;
+import src.ui.UiSupport;
 
 import javax.swing.*;
 import java.sql.SQLException;
@@ -53,7 +54,7 @@ public class Main {
 
             exception.printStackTrace();
 
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     null,
                     "Unable to initialize EquipLink database.\n"
                             + exception.getMessage(),

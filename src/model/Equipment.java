@@ -13,6 +13,7 @@ public class Equipment {
     private final String status;
     private final String custodianRole;
     private final int inUseQuantity;
+    private final String location;
 
     public Equipment(
             long equipmentId,
@@ -26,7 +27,7 @@ public class Equipment {
             String status,
             String custodianRole) {
         this(equipmentId, equipmentCode, equipmentName, category, totalQuantity,
-                damagedQuantity, lostQuantity, availableQuantity, status, custodianRole, 0);
+                damagedQuantity, lostQuantity, availableQuantity, status, custodianRole, 0, null);
     }
 
     public Equipment(
@@ -41,6 +42,24 @@ public class Equipment {
             String status,
             String custodianRole,
             int inUseQuantity) {
+        this(equipmentId, equipmentCode, equipmentName, category, totalQuantity,
+                damagedQuantity, lostQuantity, availableQuantity, status,
+                custodianRole, inUseQuantity, null);
+    }
+
+    public Equipment(
+            long equipmentId,
+            String equipmentCode,
+            String equipmentName,
+            String category,
+            int totalQuantity,
+            int damagedQuantity,
+            int lostQuantity,
+            int availableQuantity,
+            String status,
+            String custodianRole,
+            int inUseQuantity,
+            String location) {
         this.inUseQuantity = inUseQuantity;
 
         this.equipmentId = equipmentId;
@@ -53,6 +72,7 @@ public class Equipment {
         this.availableQuantity = availableQuantity;
         this.status = status;
         this.custodianRole = custodianRole;
+        this.location = location;
     }
 
     public long getEquipmentId() { return equipmentId; }
@@ -67,4 +87,5 @@ public class Equipment {
     public String getCustodianRole() { return custodianRole; }
     /** Units released to borrowers and not yet returned. */
     public int getInUseQuantity() { return inUseQuantity; }
+    public String getLocation() { return location; }
 }

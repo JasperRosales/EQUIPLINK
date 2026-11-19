@@ -265,12 +265,49 @@ public class EquipmentService {
             "GREATEST(e.total_quantity - e.damaged_quantity - e.lost_quantity - "
                     + IN_USE_SQL + ", 0)";
 
+    /** Current location, derived from equipment status and released/borrowed transactions. */
+    private static final String LOCATION_SQL = """
+            CASE
+                WHEN e.status = 'UNDER_MAINTENANCE' THEN 'Under Maintenance'
+                WHEN e.status = 'RETIRED' THEN 'Retired'
+                WHEN EXISTS (
+                    SELECT 1 FROM request_items ri
+                    JOIN request_groups rg ON rg.group_id = ri.group_id
+                    JOIN borrow_requests br ON br.request_id = ri.request_id
+                    LEFT JOIN request_occurrences ro ON ro.occurrence_id = rg.occurrence_id
+                    WHERE ri.assigned_equipment_id = e.equipment_id
+                      AND rg.status = 'RELEASED'
+                      AND COALESCE(ro.event_date, br.event_date)
+                          + COALESCE(ro.end_time, br.end_time)
+                          < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::timestamp
+                ) THEN 'Under Inspection'
+                WHEN EXISTS (
+                    SELECT 1 FROM request_items ri
+                    JOIN request_groups rg ON rg.group_id = ri.group_id
+                    JOIN borrow_requests br ON br.request_id = ri.request_id
+                    JOIN users u ON u.user_id = br.borrower_id
+                    WHERE ri.assigned_equipment_id = e.equipment_id
+                      AND rg.status = 'RELEASED'
+                      AND u.borrower_type = 'FACULTY'
+                ) THEN 'Borrowed by Faculty'
+                WHEN EXISTS (
+                    SELECT 1 FROM request_items ri
+                    JOIN request_groups rg ON rg.group_id = ri.group_id
+                    WHERE ri.assigned_equipment_id = e.equipment_id
+                      AND rg.status = 'RELEASED'
+                ) THEN 'Borrowed by Student'
+                WHEN e.custodian_role = 'ICT_STAFF' THEN 'Available at ICT Office'
+                ELSE 'Available at Facility Office'
+            END
+            """;
+
     private static final String EQUIPMENT_COLUMNS = """
             e.equipment_id, e.equipment_code, e.equipment_name,
             e.category, e.total_quantity, e.damaged_quantity,
             e.lost_quantity, e.status, e.custodian_role,
             """ + ON_HAND_SQL + " AS available_quantity, "
-            + IN_USE_SQL + " AS in_use_quantity\n";
+            + IN_USE_SQL + " AS in_use_quantity,\n"
+            + LOCATION_SQL + " AS location\n";
 
     /**
      * Units on hand for one item. Inventory is deducted only when staff release
@@ -322,6 +359,7 @@ public class EquipmentService {
                 result.getInt("available_quantity"),
                 result.getString("status"),
                 result.getString("custodian_role"),
-                result.getInt("in_use_quantity"));
+                result.getInt("in_use_quantity"),
+                result.getString("location"));
     }
 }

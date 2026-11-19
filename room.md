@@ -23,8 +23,6 @@
 - Nurse Office
 - OGC Office
 - OJT Office
-- Testing Admission Office 
-- Cashiering Office
+- Testing Admission Office
+- CASHIERING OFFICE
 - OSD Office
-- Registrar Office
-

@@ -9,6 +9,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
@@ -79,8 +80,30 @@ public class SettingsPanel extends JPanel {
                 "Notification settings", "Choose whether to receive request updates.");
         JCheckBox toggle = new JCheckBox("Enable notifications", enabled);
         styleOption(toggle);
-        toggle.addActionListener(event -> onNotificationsChange.accept(toggle.isSelected()));
-        panel.add(toggle, BorderLayout.CENTER);
+        PrimaryButton save = new PrimaryButton("Save");
+        save.setToolTipText("Save your notification preference");
+        save.addActionListener(event -> {
+            if (!UiSupport.beginAction(save)) {
+                return;
+            }
+            try {
+                onNotificationsChange.accept(toggle.isSelected());
+                UiSupport.showMessageDialog(this,
+                        "Notification preference saved.",
+                        "Settings saved", JOptionPane.INFORMATION_MESSAGE);
+            } catch (RuntimeException exception) {
+                UiSupport.showMessageDialog(this,
+                        "Unable to save notification preference: " + exception.getMessage(),
+                        "Settings not saved", JOptionPane.ERROR_MESSAGE);
+            } finally {
+                UiSupport.endAction(save);
+            }
+        });
+        JPanel body = new JPanel(new BorderLayout(12, 0));
+        body.setOpaque(false);
+        body.add(toggle, BorderLayout.CENTER);
+        body.add(save, BorderLayout.EAST);
+        panel.add(body, BorderLayout.CENTER);
         return panel;
     }
 

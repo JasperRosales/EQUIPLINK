@@ -37,6 +37,17 @@ public class NotificationController {
         return notificationService.deleteAll(userId);
     }
 
+    /** Undo a single notification deletion inside the recovery window. */
+    public void restore(long userId, long notificationId) throws Exception {
+        notificationService.restore(userId, notificationId);
+    }
+
+    /** Undo a "Delete all" action for the given notification ids. */
+    public int restoreAll(long userId, java.util.Collection<Long> notificationIds)
+            throws Exception {
+        return notificationService.restoreAll(userId, notificationIds);
+    }
+
     public String changeToken(long userId) throws Exception {
         return notificationService.changeToken(userId);
     }

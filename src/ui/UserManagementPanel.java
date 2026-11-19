@@ -14,9 +14,9 @@ import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 
 public class UserManagementPanel extends JPanel {
@@ -62,7 +62,7 @@ public class UserManagementPanel extends JPanel {
         titleBar.add(titles, BorderLayout.CENTER);
         src.ui.components.PrimaryButton createFaculty =
                 new src.ui.components.PrimaryButton("Create faculty account");
-        createFaculty.addActionListener(event -> createFacultyAccount());
+        createFaculty.addActionListener(event -> createFacultyAccount(createFaculty));
         JPanel actionWrap = new JPanel(new java.awt.GridBagLayout());
         actionWrap.setOpaque(false);
         actionWrap.add(createFaculty);
@@ -116,12 +116,11 @@ public class UserManagementPanel extends JPanel {
 
     private void updateDepartments() {
         String selected = (String) department.getSelectedItem();
-        Set<String> departments = new LinkedHashSet<>();
+        Set<String> departments = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         departments.add("All departments");
         for (User user : users) {
-            if ("STUDENT".equals(user.getBorrowerType())
-                    && user.getDepartment() != null && !user.getDepartment().isBlank()) {
-                departments.add(user.getDepartment());
+            if (user.getDepartment() != null && !user.getDepartment().isBlank()) {
+                departments.add(user.getDepartment().trim());
             }
         }
         department.removeAllItems();
@@ -149,10 +148,10 @@ public class UserManagementPanel extends JPanel {
                     && !"STUDENT".equals(user.getBorrowerType())) {
                 continue;
             }
-            if ("Student".equals(selectedType)
-                    && selectedDepartment != null
+            if (selectedDepartment != null
                     && !"All departments".equals(selectedDepartment)
-                    && !selectedDepartment.equals(user.getDepartment())) {
+                    && !selectedDepartment.equalsIgnoreCase(
+                            user.getDepartment() == null ? "" : user.getDepartment().trim())) {
                 continue;
             }
             String searchable = user.getFullName() + " " + user.getUsername()
@@ -213,7 +212,10 @@ public class UserManagementPanel extends JPanel {
 
     private void deleteBorrowerAccount(
             User user, src.ui.components.PrimaryButton deleteButton) {
-        int answer = javax.swing.JOptionPane.showConfirmDialog(
+        if (!UiSupport.beginAction(deleteButton)) {
+            return;
+        }
+        int answer = UiSupport.showConfirmDialog(
                 this,
                 "Permanently delete " + user.getFullName() + " ("
                         + user.getUsername() + ")?\n\n"
@@ -223,10 +225,10 @@ public class UserManagementPanel extends JPanel {
                 javax.swing.JOptionPane.YES_NO_OPTION,
                 javax.swing.JOptionPane.WARNING_MESSAGE);
         if (answer != javax.swing.JOptionPane.YES_OPTION) {
+            UiSupport.endAction(deleteButton);
             return;
         }
 
-        deleteButton.setEnabled(false);
         deleteButton.setText("Deleting...");
         new SwingWorker<Void, Void>() {
             @Override
@@ -241,20 +243,25 @@ public class UserManagementPanel extends JPanel {
                     get();
                     loadUsers();
                 } catch (Exception exception) {
-                    deleteButton.setEnabled(true);
-                    deleteButton.setText("Delete");
-                    javax.swing.JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             UserManagementPanel.this,
                             messageOf(exception),
                             "Unable to delete account",
                             javax.swing.JOptionPane.WARNING_MESSAGE);
+                } finally {
+                    deleteButton.setText("Delete");
+                    UiSupport.endAction(deleteButton);
                 }
             }
         }.execute();
     }
 
-    private void createFacultyAccount() {
-        JTextField fullName = new JTextField(24);
+    private void createFacultyAccount(javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        try {
+            JTextField fullName = new JTextField(24);
         JTextField username = new JTextField(24);
         JTextField email = new JTextField(24);
         JTextField departmentField = new JTextField(24);
@@ -297,7 +304,7 @@ public class UserManagementPanel extends JPanel {
         form.add(note, c);
 
         while (true) {
-            int answer = javax.swing.JOptionPane.showConfirmDialog(
+            int answer = UiSupport.showConfirmDialog(
                     this, form, "Create faculty account",
                     javax.swing.JOptionPane.OK_CANCEL_OPTION,
                     javax.swing.JOptionPane.PLAIN_MESSAGE);
@@ -310,7 +317,7 @@ public class UserManagementPanel extends JPanel {
                         actor, username.getText(), email.getText(), fullName.getText(),
                         departmentField.getText(), temporary.toCharArray());
             } catch (Exception exception) {
-                javax.swing.JOptionPane.showMessageDialog(this,
+                UiSupport.showMessageDialog(this,
                         messageOf(exception), "Unable to create account",
                         javax.swing.JOptionPane.WARNING_MESSAGE);
                 continue;
@@ -323,11 +330,14 @@ public class UserManagementPanel extends JPanel {
             done.add(shown, BorderLayout.CENTER);
             done.add(new JLabel("Temporary password, copy it now; it won't be shown again."),
                     BorderLayout.SOUTH);
-            javax.swing.JOptionPane.showMessageDialog(this, done, "Account created",
+            UiSupport.showMessageDialog(this, done, "Account created",
                     javax.swing.JOptionPane.INFORMATION_MESSAGE);
             borrowerType.setSelectedItem("Faculty");
             loadUsers();
             return;
+        }
+        } finally {
+            UiSupport.endAction(source);
         }
     }
 

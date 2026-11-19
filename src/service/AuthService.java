@@ -19,7 +19,7 @@ public class AuthService {
 
         String sql = """
                 SELECT user_id, username, email, full_name,
-                       department, role, borrower_type, active,
+                       department, role, borrower_type, active, notifications_enabled,
                        password_hash, password_salt,
                        password_iterations
                 FROM users
@@ -58,7 +58,7 @@ public class AuthService {
                     return null;
                 }
 
-                return new User(
+                User user = new User(
                         rs.getLong("user_id"),
                         rs.getString("username"),
                         rs.getString("email"),
@@ -67,6 +67,8 @@ public class AuthService {
                         rs.getString("role"),
                         rs.getString("borrower_type"),
                         rs.getBoolean("active"));
+                user.setNotificationsEnabled(rs.getBoolean("notifications_enabled"));
+                return user;
             }
         }
     }
@@ -261,17 +263,39 @@ public class AuthService {
         }
     }
 
-    public void requestPasswordReset(String usernameOrEmail) throws Exception {
+    public void updateNotificationPreference(long userId, boolean enabled) throws Exception {
+        if (userId <= 0) {
+            throw new IllegalArgumentException("A signed-in account is required.");
+        }
+        String sql = "UPDATE users SET notifications_enabled = ? WHERE user_id = ?";
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setBoolean(1, enabled);
+            statement.setLong(2, userId);
+            if (statement.executeUpdate() != 1) {
+                throw new IllegalStateException("Notification preference could not be saved.");
+            }
+        }
+    }
+
+    public void requestPasswordReset(String usernameOrEmail, String registeredEmail) throws Exception {
         if (usernameOrEmail == null || usernameOrEmail.isBlank()) {
             throw new IllegalArgumentException("Enter your username or email.");
+        }
+
+        boolean emailProvided = registeredEmail != null && !registeredEmail.isBlank();
+        if (!emailProvided) {
+            throw new IllegalArgumentException(
+                    "Enter the email registered to your account for identity verification.");
         }
 
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
                 Long userId = null;
+                boolean emailMatches = false;
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT user_id
+                        SELECT user_id, email
                         FROM users
                         WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
                         FOR UPDATE
@@ -282,27 +306,34 @@ public class AuthService {
                     try (ResultSet result = statement.executeQuery()) {
                         if (result.next()) {
                             userId = result.getLong("user_id");
+                            emailMatches = result.getString("email") != null
+                                    && result.getString("email").trim().equalsIgnoreCase(registeredEmail.trim());
                         }
                     }
                 }
 
-                if (userId != null) {
-                    try (PreparedStatement statement = connection.prepareStatement("""
-                            SELECT reset_request_id
-                            FROM password_reset_requests
-                            WHERE user_id = ? AND status IN ('PENDING', 'APPROVED')
-                            FOR UPDATE
-                            """)) {
-                        statement.setLong(1, userId);
-                        try (ResultSet result = statement.executeQuery()) {
-                            if (!result.next()) {
-                                try (PreparedStatement insert = connection.prepareStatement("""
-                                        INSERT INTO password_reset_requests (user_id)
-                                        VALUES (?)
-                                        """)) {
-                                    insert.setLong(1, userId);
-                                    insert.executeUpdate();
-                                }
+                if (!emailMatches) {
+                    throw new IllegalArgumentException(
+                            "The registered email does not match this account.");
+                }
+
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        SELECT reset_request_id
+                        FROM password_reset_requests
+                        WHERE user_id = ? AND status IN ('PENDING', 'APPROVED')
+                          AND registered_email_match = TRUE AND identity_verified = TRUE
+                        FOR UPDATE
+                        """)) {
+                    statement.setLong(1, userId);
+                    try (ResultSet result = statement.executeQuery()) {
+                        if (!result.next()) {
+                            try (PreparedStatement insert = connection.prepareStatement("""
+                                    INSERT INTO password_reset_requests
+                                    (user_id, registered_email_match, identity_verified)
+                                    VALUES (?, TRUE, TRUE)
+                                    """)) {
+                                insert.setLong(1, userId);
+                                insert.executeUpdate();
                             }
                         }
                     }
@@ -317,6 +348,7 @@ public class AuthService {
 
     public void resetPasswordAfterApproval(
             String usernameOrEmail,
+            String registeredEmail,
             char[] newPassword) throws Exception {
                 if (usernameOrEmail == null || usernameOrEmail.isBlank()
                         || newPassword == null || newPassword.length < 8) {
@@ -329,7 +361,7 @@ public class AuthService {
                     try {
                         long userId;
                         try (PreparedStatement statement = connection.prepareStatement("""
-                                SELECT user_id
+                                SELECT user_id, email, role
                                 FROM users
                                 WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
                                 FOR UPDATE
@@ -342,6 +374,12 @@ public class AuthService {
                                     throw new IllegalArgumentException(
                                             "There is no approved password reset request for this account.");
                                 }
+                                if (registeredEmail == null || registeredEmail.isBlank()
+                                        || result.getString("email") == null
+                                        || !result.getString("email").trim().equalsIgnoreCase(registeredEmail.trim())) {
+                                    throw new IllegalArgumentException(
+                                            "The registered email does not match this account.");
+                                }
                                 userId = result.getLong("user_id");
                             }
                         }
@@ -351,6 +389,7 @@ public class AuthService {
                                 SELECT reset_request_id
                                 FROM password_reset_requests
                                 WHERE user_id = ? AND status = 'APPROVED'
+                                  AND registered_email_match = TRUE AND identity_verified = TRUE
                                 ORDER BY requested_at DESC
                                 LIMIT 1
                                 FOR UPDATE
@@ -359,7 +398,7 @@ public class AuthService {
                             try (ResultSet result = statement.executeQuery()) {
                                 if (!result.next()) {
                                     throw new IllegalArgumentException(
-                                            "There is no approved password reset request for this account.");
+                                            "There is no verified, approved password reset request for this account.");
                                 }
                                 requestId = result.getLong("reset_request_id");
                             }
@@ -402,10 +441,11 @@ public class AuthService {
 
             public List<PasswordResetRequest> findPasswordResetRequests(String actorRole)
                     throws Exception {
-                requireIctStaff(actorRole);
+                requirePasswordResetReviewerRole(actorRole);
                 String sql = """
                         SELECT pr.reset_request_id, u.user_id, u.username, u.full_name,
-                               u.email, u.role, u.department, pr.requested_at
+                               u.email, u.role, u.department, pr.requested_at,
+                               pr.registered_email_match, pr.identity_verified
                         FROM password_reset_requests pr
                         JOIN users u ON u.user_id = pr.user_id
                         WHERE pr.status = 'PENDING'
@@ -424,7 +464,9 @@ public class AuthService {
                                 result.getString("email"),
                                 result.getString("role"),
                                 result.getString("department"),
-                                result.getTimestamp("requested_at").toLocalDateTime()));
+                                result.getTimestamp("requested_at").toLocalDateTime(),
+                                result.getBoolean("registered_email_match"),
+                                result.getBoolean("identity_verified")));
                     }
                 }
                 return requests;
@@ -436,7 +478,7 @@ public class AuthService {
                     long requestId,
                     boolean approve,
                     String note) throws Exception {
-                requireIctStaff(actorRole);
+                requirePasswordResetReviewerRole(actorRole);
                 if (requestId <= 0) {
                     throw new IllegalArgumentException("A valid reset request is required.");
                 }
@@ -445,6 +487,34 @@ public class AuthService {
                 try (Connection connection = Database.getConnection()) {
                     connection.setAutoCommit(false);
                     try {
+                        long targetUserId;
+                        String targetRole;
+                        boolean emailMatched;
+                        boolean identityVerified;
+                        try (PreparedStatement statement = connection.prepareStatement("""
+                                SELECT pr.user_id, u.role, pr.registered_email_match, pr.identity_verified
+                                FROM password_reset_requests pr
+                                JOIN users u ON u.user_id = pr.user_id
+                                WHERE pr.reset_request_id = ? AND pr.status = 'PENDING'
+                                """)) {
+                            statement.setLong(1, requestId);
+                            try (ResultSet result = statement.executeQuery()) {
+                                if (!result.next()) {
+                                    throw new IllegalArgumentException(
+                                            "This password reset request was already reviewed.");
+                                }
+                                targetUserId = result.getLong("user_id");
+                                targetRole = result.getString("role");
+                                emailMatched = result.getBoolean("registered_email_match");
+                                identityVerified = result.getBoolean("identity_verified");
+                            }
+                        }
+                        requirePasswordResetReviewer(actorRole, actorId, targetRole, targetUserId);
+                        if (approve && (!emailMatched || !identityVerified)) {
+                            throw new SecurityException(
+                                    "This password reset request is not identity verified.");
+                        }
+
                         long userId;
                         try (PreparedStatement statement = connection.prepareStatement("""
                                 UPDATE password_reset_requests
@@ -470,15 +540,20 @@ public class AuthService {
                                 ? "Password reset approved"
                                 : "Password reset request declined";
                         String message = approve
-                                ? "ICT approved your request. Open Forgot password on the login screen to set a new password."
-                                : "ICT declined your password reset request. Contact the system administrator for help.";
+                                ? "An authorized reviewer approved your request. Open Forgot password on the login screen to set a new password."
+                                : "Your password reset request was declined. Contact the system administrator for help.";
                         try (PreparedStatement statement = connection.prepareStatement("""
                                 INSERT INTO notifications (user_id, title, message)
-                                VALUES (?, ?, ?)
+                                SELECT ?, ?, ?
+                                WHERE EXISTS (
+                                    SELECT 1 FROM users
+                                    WHERE user_id = ? AND COALESCE(notifications_enabled, TRUE) = TRUE
+                                )
                                 """)) {
                             statement.setLong(1, userId);
                             statement.setString(2, title);
                             statement.setString(3, message);
+                            statement.setLong(4, userId);
                             statement.executeUpdate();
                         }
                         connection.commit();
@@ -546,5 +621,36 @@ public class AuthService {
                 if (!"ICT_STAFF".equalsIgnoreCase(actorRole == null ? "" : actorRole.trim())) {
                     throw new SecurityException("Only ICT system administrators can manage this.");
                 }
+            }
+
+            private void requirePasswordResetReviewerRole(String actorRole) {
+                String role = actorRole == null ? "" : actorRole.trim().toUpperCase();
+                if (!role.equals("ICT_STAFF") && !role.equals("ADMIN") && !role.equals("DIRECTOR")) {
+                    throw new SecurityException("Only authorized administrators can review password requests.");
+                }
+            }
+
+            private void requirePasswordResetReviewer(
+                    String actorRole, long actorId, String targetRole, long targetId) {
+                requirePasswordResetReviewerRole(actorRole);
+                String role = actorRole.trim().toUpperCase();
+                String target = targetRole == null ? "" : targetRole.trim().toUpperCase();
+                if (actorId == targetId) {
+                    throw new SecurityException("You cannot review your own password reset request.");
+                }
+                if (isElevatedRole(target) && !isFacilityOrDirector(role)) {
+                    throw new SecurityException(
+                            "Password recovery for elevated accounts requires a Facility or Campus Director reviewer.");
+                }
+            }
+
+            private boolean isFacilityOrDirector(String role) {
+                String value = role == null ? "" : role.trim().toUpperCase();
+                return value.equals("ADMIN") || value.equals("DIRECTOR");
+            }
+
+            private boolean isElevatedRole(String role) {
+                String value = role == null ? "" : role.trim().toUpperCase();
+                return value.equals("ICT_STAFF") || value.equals("ADMIN") || value.equals("DIRECTOR");
             }
 }

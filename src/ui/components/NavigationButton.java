@@ -20,7 +20,10 @@ public class NavigationButton extends JButton {
         setHorizontalAlignment(LEFT);
         setFont(AppTheme.regular(12.5f));
         setForeground(AppTheme.sidebarText());
-        setBorder(new EmptyBorder(9, 18, 9, 10));
+        setIcon(LucideIcon.forMenu(text));
+        setIconTextGap(6);
+        // 16px icon + 6px gap + 16px inset keeps the label clear of the accent bar.
+        setBorder(new EmptyBorder(9, 16, 9, 10));
         setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         setFocusPainted(false);
         setBorderPainted(false);

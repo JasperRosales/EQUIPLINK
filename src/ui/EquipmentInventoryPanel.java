@@ -28,9 +28,16 @@ public class EquipmentInventoryPanel extends JPanel {
 
     private static final int REFRESH_MILLIS = 10_000;
     private static final String ALL_CATEGORIES = "All categories";
-    private static final String[] QUANTITY_FILTERS = {
-            "Any quantity", "In stock", "Low stock (1–5)", "6–20 available",
-            "More than 20", "Out of stock" };
+    private static final String QTY_ANY = "Any quantity";
+    private static final String QTY_NONE = "Unavailable (0 on hand)";
+    private static final String QTY_LOW = "Low stock (1–5)";
+    private static final String QTY_CATALOG_LOW = "1–5 available";
+    private static final String QTY_MID = "6–20 available";
+    private static final String QTY_HIGH = "More than 20";
+    private static final String[] STAFF_QUANTITY_FILTERS = {
+            QTY_ANY, QTY_NONE, QTY_LOW, QTY_MID, QTY_HIGH };
+    private static final String[] CATALOG_QUANTITY_FILTERS = {
+            QTY_ANY, QTY_CATALOG_LOW, QTY_MID, QTY_HIGH };
 
     private final User actor;
     private final EquipmentController equipmentController;
@@ -38,7 +45,7 @@ public class EquipmentInventoryPanel extends JPanel {
     private final JTextField search = new JTextField(22);
     private final JComboBox<String> categoryFilter = new JComboBox<>(
             new String[] { ALL_CATEGORIES });
-    private final JComboBox<String> quantityFilter = new JComboBox<>(QUANTITY_FILTERS);
+    private final JComboBox<String> quantityFilter = new JComboBox<>();
     private final JPanel inventoryList = new JPanel();
     private final JLabel updatedLabel = new JLabel(" ");
     private final JLabel selectionLabel = new JLabel();
@@ -69,6 +76,8 @@ public class EquipmentInventoryPanel extends JPanel {
         this.actor = actor;
         this.equipmentController = equipmentController;
         this.onRequest = onRequest;
+        quantityFilter.setModel(new javax.swing.DefaultComboBoxModel<>(
+                isCatalog() ? CATALOG_QUANTITY_FILTERS : STAFF_QUANTITY_FILTERS));
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(AppTheme.background());
         setBorder(new EmptyBorder(2, 2, 22, 2));
@@ -146,7 +155,7 @@ public class EquipmentInventoryPanel extends JPanel {
         actions.add(quantityFilter);
         if (canManageInventory()) {
             PrimaryButton addButton = new PrimaryButton("Add equipment");
-            addButton.addActionListener(event -> showEquipmentEditor(null));
+            addButton.addActionListener(event -> showEquipmentEditor(null, addButton));
             actions.add(addButton);
         }
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
@@ -274,20 +283,14 @@ public class EquipmentInventoryPanel extends JPanel {
 
     private boolean matchesQuantity(Equipment item) {
         int available = "AVAILABLE".equals(item.getStatus()) ? item.getAvailableQuantity() : 0;
-        switch (quantityFilter.getSelectedIndex()) {
-            case 1:
-                return available > 0;
-            case 2:
-                return available >= 1 && available <= 5;
-            case 3:
-                return available >= 6 && available <= 20;
-            case 4:
-                return available > 20;
-            case 5:
-                return available == 0;
-            default:
-                return true;
-        }
+        String selected = String.valueOf(quantityFilter.getSelectedItem());
+        return switch (selected) {
+            case QTY_NONE -> available == 0;
+            case QTY_LOW, QTY_CATALOG_LOW -> available >= 1 && available <= 5;
+            case QTY_MID -> available >= 6 && available <= 20;
+            case QTY_HIGH -> available > 20;
+            default -> true;
+        };
     }
 
     private void showEquipment() {
@@ -417,9 +420,9 @@ public class EquipmentInventoryPanel extends JPanel {
             JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0));
             actions.setOpaque(false);
             PrimaryButton edit = new PrimaryButton("Edit", PrimaryButton.Style.SECONDARY);
-            edit.addActionListener(event -> showEquipmentEditor(item));
+            edit.addActionListener(event -> showEquipmentEditor(item, edit));
             PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
-            delete.addActionListener(event -> deleteEquipment(item));
+            delete.addActionListener(event -> deleteEquipment(item, delete));
             actions.add(edit);
             actions.add(delete);
             card.add(actions, BorderLayout.SOUTH);
@@ -494,7 +497,10 @@ public class EquipmentInventoryPanel extends JPanel {
         onRequest.accept(items);
     }
 
-    private void showEquipmentEditor(Equipment equipment) {
+    private void showEquipmentEditor(Equipment equipment, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
         JTextField code = new JTextField(equipment == null ? "" : equipment.getEquipmentCode());
         JTextField name = new JTextField(equipment == null ? "" : equipment.getEquipmentName());
         JTextField category = new JTextField(equipment == null ? "" : equipment.getCategory());
@@ -522,16 +528,18 @@ public class EquipmentInventoryPanel extends JPanel {
         form.add(editorLabel("Status"));
         form.add(status);
 
-        int answer = JOptionPane.showConfirmDialog(
+        int answer = UiSupport.showConfirmDialog(
                 this, form,
                 equipment == null ? "Add equipment" : "Update equipment",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) {
+            UiSupport.endAction(source);
             return;
         }
         long quantityValue = ((Number) quantity.getValue()).longValue();
         if (quantityValue > Integer.MAX_VALUE) {
-            JOptionPane.showMessageDialog(
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(
                     this, "Quantity is too large.", "Invalid quantity",
                     JOptionPane.WARNING_MESSAGE);
             return;
@@ -556,22 +564,28 @@ public class EquipmentInventoryPanel extends JPanel {
                     get();
                     loadEquipment(false);
                 } catch (Exception exception) {
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             EquipmentInventoryPanel.this,
                             "Unable to save equipment: " + messageOf(exception),
                             "Inventory update failed", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
                 }
             }
         }.execute();
     }
 
-    private void deleteEquipment(Equipment equipment) {
-        int answer = JOptionPane.showConfirmDialog(
+    private void deleteEquipment(Equipment equipment, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        int answer = UiSupport.showConfirmDialog(
                 this,
                 "Remove " + equipment.getEquipmentName()
                         + " from future requests? Existing request history will be retained.",
                 "Delete equipment", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.YES_OPTION) {
+            UiSupport.endAction(source);
             return;
         }
         new SwingWorker<Void, Void>() {
@@ -587,10 +601,12 @@ public class EquipmentInventoryPanel extends JPanel {
                     get();
                     loadEquipment(false);
                 } catch (Exception exception) {
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             EquipmentInventoryPanel.this,
                             "Unable to delete equipment: " + messageOf(exception),
                             "Inventory update failed", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
                 }
             }
         }.execute();

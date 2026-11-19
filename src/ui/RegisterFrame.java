@@ -151,7 +151,7 @@ public class RegisterFrame extends JDialog {
         if (!Arrays.equals(pass, confirmation)) {
             clear(pass, confirmation);
             confirmPassword.setText("");
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     this,
                     "The passwords do not match.",
                     "Check your password",
@@ -183,7 +183,7 @@ public class RegisterFrame extends JDialog {
                 createButton.setText("Create account");
                 try {
                     get();
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             RegisterFrame.this,
                             "Your account has been created. You can now sign in.",
                             "Registration successful",
@@ -192,7 +192,7 @@ public class RegisterFrame extends JDialog {
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             RegisterFrame.this,
                             cause.getMessage(),
                             "Registration error",

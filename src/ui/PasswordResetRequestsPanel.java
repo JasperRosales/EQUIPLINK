@@ -11,13 +11,11 @@ import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -25,7 +23,6 @@ public class PasswordResetRequestsPanel extends JPanel {
 
     private final User actor;
     private final AuthController authController;
-    private final JTextField search = new JTextField(22);
     private final JPanel requestsList = new JPanel();
     private List<PasswordResetRequest> requests = List.of();
 
@@ -51,24 +48,13 @@ public class PasswordResetRequestsPanel extends JPanel {
         JLabel title = new JLabel("Password change requests");
         title.setFont(AppTheme.semibold(18));
         title.setForeground(AppTheme.foreground());
-        JLabel subtitle = new JLabel("Review and approve password recovery requests from all account roles.");
+        JLabel subtitle = new JLabel("Password recovery requests from all roles. Verified requests are marked; elevated accounts require a Facility Admin or Campus Director reviewer.");
         subtitle.setFont(AppTheme.regular(11));
         subtitle.setForeground(AppTheme.muted());
         text.add(title);
         text.add(Box.createVerticalStrut(4));
         text.add(subtitle);
         header.add(text, BorderLayout.NORTH);
-
-        JPanel controls = new JPanel(new BorderLayout(8, 0));
-        controls.setOpaque(false);
-        UiSupport.styleInput(search);
-        search.addActionListener(event -> showRequests());
-        search.getDocument().addDocumentListener(UiSupport.documentListener(this::showRequests));
-        controls.add(search, BorderLayout.CENTER);
-        PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
-        refresh.addActionListener(event -> loadRequests());
-        controls.add(refresh, BorderLayout.EAST);
-        header.add(controls, BorderLayout.CENTER);
         header.setAlignmentX(LEFT_ALIGNMENT);
         add(header);
         add(Box.createVerticalStrut(14));
@@ -96,24 +82,11 @@ public class PasswordResetRequestsPanel extends JPanel {
 
     private void showRequests() {
         requestsList.removeAll();
-        String query = search.getText().trim().toLowerCase();
-        List<PasswordResetRequest> filtered = new ArrayList<>();
-        for (PasswordResetRequest request : requests) {
-            String searchable = request.getFullName() + " " + request.getUsername()
-                    + " " + request.getEmail() + " " + request.getRole()
-                    + " " + request.getDepartment();
-            if (searchable.toLowerCase().contains(query)) {
-                filtered.add(request);
-            }
-        }
-        if (filtered.isEmpty()) {
+        if (requests.isEmpty()) {
             requestsList.add(message(
-                    requests.isEmpty()
-                            ? "There are no password reset requests waiting for review."
-                            : "No requests match your search.",
-                    false));
+                    "There are no password reset requests waiting for review.", false));
         } else {
-            for (PasswordResetRequest request : filtered) {
+            for (PasswordResetRequest request : requests) {
                 requestsList.add(requestCard(request));
                 requestsList.add(Box.createVerticalStrut(9));
             }
@@ -173,34 +146,67 @@ public class PasswordResetRequestsPanel extends JPanel {
         details.add(meta);
         details.add(Box.createVerticalStrut(4));
         details.add(date);
+        boolean verified = request.isRegisteredEmailMatch() && request.isIdentityVerified();
+        JLabel verification = new JLabel(verified
+                ? "✓ Identity verified via registered email"
+                : "! Identity verification incomplete");
+        verification.setFont(AppTheme.semibold(10));
+        verification.setForeground(verified ? AppTheme.success() : AppTheme.danger());
+        details.add(Box.createVerticalStrut(4));
+        details.add(verification);
         card.add(details, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 7, 0));
         actions.setOpaque(false);
         PrimaryButton approve = new PrimaryButton("Approve");
-        approve.addActionListener(event -> review(request, true));
+        boolean canApprove = canApprove(request);
+        approve.setEnabled(canApprove);
+        if (!canApprove) {
+            approve.setToolTipText("Identity verification or reviewer authorization is incomplete.");
+        }
+        approve.addActionListener(event -> review(request, true, approve));
         PrimaryButton reject = new PrimaryButton("Reject", PrimaryButton.Style.DANGER);
-        reject.addActionListener(event -> review(request, false));
+        reject.addActionListener(event -> review(request, false, reject));
         actions.add(approve);
         actions.add(reject);
         card.add(actions, BorderLayout.SOUTH);
         return card;
     }
 
-    private void review(PasswordResetRequest request, boolean approve) {
-        String note = JOptionPane.showInputDialog(
+    private boolean canApprove(PasswordResetRequest request) {
+        if (!request.isRegisteredEmailMatch() || !request.isIdentityVerified()) {
+            return false;
+        }
+        if (actor.getUserId() == request.getUserId()) {
+            return false;
+        }
+        String actorRole = actor.getRole() == null ? "" : actor.getRole().trim().toUpperCase();
+        String targetRole = request.getRole() == null ? "" : request.getRole().trim().toUpperCase();
+        boolean elevatedTarget = targetRole.equals("ICT_STAFF")
+                || targetRole.equals("ADMIN") || targetRole.equals("DIRECTOR");
+        return !elevatedTarget || actorRole.equals("ADMIN") || actorRole.equals("DIRECTOR");
+    }
+
+    private void review(
+            PasswordResetRequest request, boolean approve, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        String note = UiSupport.showInputDialog(
                 this,
                 approve ? "Optional approval note:" : "Reason for declining this request:",
                 approve ? "Approve password reset" : "Decline password reset",
                 JOptionPane.QUESTION_MESSAGE);
         if (!approve && note == null) {
+            UiSupport.endAction(source);
             return;
         }
         if (approve && note == null) {
             note = "";
         }
         if (!approve && note.isBlank()) {
-            JOptionPane.showMessageDialog(
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(
                     this, "Enter a reason before declining.", "Reason required",
                     JOptionPane.WARNING_MESSAGE);
             return;
@@ -220,10 +226,12 @@ public class PasswordResetRequestsPanel extends JPanel {
                     get();
                     loadRequests();
                 } catch (Exception exception) {
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             PasswordResetRequestsPanel.this,
                             "Unable to review request: " + messageOf(exception),
                             "Review failed", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
                 }
             }
         }.execute();

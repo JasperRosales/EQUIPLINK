@@ -130,9 +130,9 @@ public class LoginFrame extends JFrame {
         passwordRow.add(password, BorderLayout.CENTER);
         char defaultEcho = password.getEchoChar();
         JToggleButton togglePassword = new JToggleButton(
-                new src.ui.components.EyeIcon(false, AppTheme.muted(), 18));
+                new src.ui.components.EyeIcon(true, AppTheme.muted(), 18));
         togglePassword.setSelectedIcon(
-                new src.ui.components.EyeIcon(true, AppTheme.primary(), 18));
+                new src.ui.components.EyeIcon(false, AppTheme.primary(), 18));
         togglePassword.setToolTipText("Show password");
         togglePassword.getAccessibleContext().setAccessibleName("Show or hide password");
         togglePassword.setPreferredSize(new Dimension(44, 45));
@@ -300,7 +300,7 @@ public class LoginFrame extends JFrame {
 
             Arrays.fill(pass, '\0');
 
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     this,
                     "Please enter your username and password.",
                     "Missing information",
@@ -339,7 +339,7 @@ public class LoginFrame extends JFrame {
 
                     if (user == null) {
 
-                        JOptionPane.showMessageDialog(
+                        UiSupport.showMessageDialog(
                                 LoginFrame.this,
                                 "Invalid login details or inactive account.",
                                 "Login failed",
@@ -358,7 +358,7 @@ public class LoginFrame extends JFrame {
                             ? exception
                             : exception.getCause();
 
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             LoginFrame.this,
                             cause.getMessage(),
                             "Login error",

@@ -10,6 +10,7 @@ public class User {
     private String role;
     private String borrowerType;
     private boolean active;
+    private boolean notificationsEnabled = true;
 
     public User(long userId, String username, String email,
             String fullName, String department,
@@ -57,6 +58,10 @@ public class User {
         return active;
     }
 
+    public boolean isNotificationsEnabled() {
+        return notificationsEnabled;
+    }
+
     public void setUserId(long userId) {
         this.userId = userId;
     }
@@ -87,5 +92,9 @@ public class User {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public void setNotificationsEnabled(boolean notificationsEnabled) {
+        this.notificationsEnabled = notificationsEnabled;
     }
 }

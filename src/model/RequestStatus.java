@@ -45,7 +45,7 @@ public final class RequestStatus {
         List<DepartmentStatus> groups = activeGroups(request, scopeRole);
         String overdue = overdue(request, groups, now);
         if (overdue != null) return overdue;
-        return fromGroups(groups);
+        return fromGroups(request, groups);
     }
 
     public static String overall(BorrowRequest request, String scopeRole) {
@@ -72,30 +72,42 @@ public final class RequestStatus {
         return null;
     }
 
-    private static String fromGroups(List<DepartmentStatus> groups) {
+    private static String fromGroups(BorrowRequest request, List<DepartmentStatus> groups) {
         if (groups.isEmpty()) return PENDING;
-        int declined = 0, assigned = 0, released = 0, returned = 0, pending = 0;
+        int declined = 0, assigned = 0, released = 0, received = 0, returned = 0, pending = 0;
         for (DepartmentStatus group : groups) {
             switch (group.getStatus()) {
                 case "DECLINED" -> declined++;
                 case "ASSIGNED" -> assigned++;
                 case "RELEASED" -> released++;
+                case "RECEIVED" -> received++;
                 case "RETURNED" -> returned++;
                 default -> pending++;
             }
         }
         int total = groups.size();
         if (declined == total) return DECLINED;
-        if (returned > 0 && returned == total - declined) {
-            return declined == 0 ? COMPLETED : PARTIALLY_RELEASED;
-        }
-        if (released + returned > 0) {
-            return released + returned == total ? FULLY_RELEASED : PARTIALLY_RELEASED;
+        if (returned > 0 && returned == total - declined) return COMPLETED;
+        if (released + received + returned > 0) {
+            return released + received + returned == total
+                    ? FULLY_RELEASED : PARTIALLY_RELEASED;
         }
         if (assigned > 0) {
+            // Department acceptance alone is only the first review stage. A request
+            // stays Pending (Awaiting Campus Director Approval) until final approval.
+            if (assigned == total && !isFinalApprovalGranted(request)) return PENDING;
             return assigned == total ? FULLY_APPROVED : PARTIALLY_APPROVED;
         }
         return PENDING;
+    }
+
+    /** True only after the Campus Director's approval (or a completed workflow). */
+    public static boolean isFinalApprovalGranted(BorrowRequest request) {
+        if (request == null) return false;
+        String stage = request.getStatus();
+        return "APPROVED".equals(stage) || "RELEASED".equals(stage)
+                || "COMPLETED".equals(stage)
+                || "APPROVED".equalsIgnoreCase(request.getDirectorStatus());
     }
 
     /** Groups still taking part in the request, optionally limited to one department. */
@@ -122,7 +134,8 @@ public final class RequestStatus {
         }
         if (all.isEmpty()) return null;
         boolean anyPending = false, anyAssigned = false, anyReleased = false,
-                anyReturned = false, anyDeclined = false, anyUnable = false, overdue = false;
+                anyReceived = false, anyReturned = false, anyDeclined = false,
+                anyUnable = false, overdue = false;
         for (DepartmentStatus group : all) {
             switch (group.getStatus()) {
                 case "PENDING" -> {
@@ -133,6 +146,7 @@ public final class RequestStatus {
                 }
                 case "ASSIGNED" -> anyAssigned = true;
                 case "RELEASED" -> anyReleased = true;
+                case "RECEIVED" -> anyReceived = true;
                 case "RETURNED" -> anyReturned = true;
                 case "DECLINED" -> anyDeclined = true;
                 case "UNABLE" -> anyUnable = true;
@@ -144,6 +158,7 @@ public final class RequestStatus {
         if (anyUnable) return "UNABLE";
         if (anyAssigned) return "ASSIGNED";
         if (anyReleased) return "RELEASED";
+        if (anyReceived) return "RECEIVED";
         if (anyReturned) return "RETURNED";
         if (anyDeclined) return "DECLINED";
         return all.get(0).getStatus();
@@ -155,6 +170,41 @@ public final class RequestStatus {
 
     public static boolean isOverdue(String overall) {
         return NOT_ASSIGNED.equals(overall) || NOT_PROCESSED.equals(overall);
+    }
+
+    /**
+     * Human-readable approval progress across all three required stages:
+     * department processing, Facility Admin review, and Campus Director review.
+     */
+    public static String approvalProgress(BorrowRequest request, String scopeRole) {
+        if (request == null) return "—";
+        List<DepartmentStatus> groups = activeGroups(request, scopeRole);
+        int done = 0;
+        for (DepartmentStatus group : groups) {
+            String status = group.getStatus();
+            if (!"PENDING".equals(status) && !"UNABLE".equals(status)
+                    && !"NOT_ASSIGNED".equals(status)) {
+                done++;
+            }
+        }
+        String departments = groups.isEmpty()
+                ? "—" : done + " of " + groups.size();
+        return "Departments " + departments
+                + "  ·  Facility Admin: " + reviewLabel(request, request.getAdminStatus(),
+                        "PENDING_ADMIN")
+                + "  ·  Campus Director: " + reviewLabel(request, request.getDirectorStatus(),
+                        "PENDING_DIRECTOR");
+    }
+
+    private static String reviewLabel(BorrowRequest request, String decision, String pendingStage) {
+        if ("APPROVED".equalsIgnoreCase(decision)) return "Approved";
+        if ("REJECTED".equalsIgnoreCase(decision)) return "Declined";
+        if (pendingStage.equals(request.getStatus())) {
+            return "PENDING_ADMIN".equals(pendingStage)
+                    ? "Awaiting Facility Admin Approval"
+                    : "Awaiting Campus Director Approval";
+        }
+        return "Not started";
     }
 
     public static String departmentLabel(String role) {
@@ -177,10 +227,10 @@ public final class RequestStatus {
         OVERDUE("Overdue / not processed", (r, s) -> is(r, s, NOT_ASSIGNED, NOT_PROCESSED)),
         NEEDS_ACTION("Needs action", (r, s) -> is(r, s, RequestStatus.NEEDS_ACTION)),
         CANCELLED("Cancelled", (r, s) -> is(r, s, RequestStatus.CANCELLED)),
-        ADMIN_REVIEW("Awaiting admin review", (r, s) -> "PENDING_ADMIN".equals(r.getStatus())),
-        DIRECTOR_REVIEW("Awaiting director review", (r, s) -> "PENDING_DIRECTOR".equals(r.getStatus())),
-        FINAL_APPROVED("Final approval granted", (r, s) -> "APPROVED".equals(r.getStatus())
-                || "RELEASED".equals(r.getStatus()) || "COMPLETED".equals(r.getStatus()));
+        ADMIN_REVIEW("Awaiting Facility Admin Approval", (r, s) -> "PENDING_ADMIN".equals(r.getStatus())),
+        DIRECTOR_REVIEW("Awaiting Campus Director Approval", (r, s) -> "PENDING_DIRECTOR".equals(r.getStatus())),
+        FINAL_APPROVED("Final approval granted",
+                (r, s) -> isFinalApprovalGranted(r));
 
         private final String label;
         private final Matcher matcher;

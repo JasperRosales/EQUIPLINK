@@ -14,6 +14,7 @@ public class ForgotPasswordDialog extends JDialog {
     private final AuthController authController;
 
     private final JTextField identity = new SoftTextField();
+    private final JTextField registeredEmail = new SoftTextField();
     private final JPasswordField newPassword = new SoftPasswordField();
     private final JPasswordField confirmPassword = new SoftPasswordField();
 
@@ -54,8 +55,8 @@ public class ForgotPasswordDialog extends JDialog {
         this.authController = authController;
 
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
-        setMinimumSize(new Dimension(620, 620));
-        setSize(640, 640);
+        setMinimumSize(new Dimension(680, 720));
+        setSize(700, 740);
         setResizable(false);
 
         setContentPane(buildContent());
@@ -83,7 +84,7 @@ public class ForgotPasswordDialog extends JDialog {
         );
 
         card.setPreferredSize(
-                new Dimension(550, 535)
+                new Dimension(550, 620)
         );
 
         // =====================================
@@ -107,9 +108,10 @@ public class ForgotPasswordDialog extends JDialog {
         // No HTML fixed-width clipping.
 
         JTextArea explanation = new JTextArea(
-                "Submit a request for ICT review. After ICT approves it, "
-                + "return here and set your new password using the same "
-                + "username or email."
+                "Verify your registered email, then submit a request for "
+                + "authorized review. Elevated accounts require a Facility "
+                + "Admin or Campus Director reviewer. After approval, return "
+                + "here with the same identity and email to set your new password."
         );
 
         explanation.setFont(AppTheme.regular(11));
@@ -154,6 +156,12 @@ public class ForgotPasswordDialog extends JDialog {
                 card,
                 "Username or email",
                 identity
+        );
+
+        addField(
+                card,
+                "Registered email (identity verification)",
+                registeredEmail
         );
 
         addField(
@@ -811,11 +819,13 @@ public class ForgotPasswordDialog extends JDialog {
 
         String enteredIdentity =
                 identity.getText().trim();
+        String enteredEmail =
+                registeredEmail.getText().trim();
 
-        if (enteredIdentity.isEmpty()) {
+        if (enteredIdentity.isEmpty() || enteredEmail.isEmpty()) {
 
             showMessage(
-                    "Enter your username or email first.",
+                    "Enter your username or email and registered email.",
                     "Missing information"
             );
 
@@ -830,7 +840,8 @@ public class ForgotPasswordDialog extends JDialog {
             protected Void doInBackground() throws Exception {
 
                 authController.requestPasswordReset(
-                        enteredIdentity
+                        enteredIdentity,
+                        enteredEmail
                 );
 
                 return null;
@@ -846,8 +857,8 @@ public class ForgotPasswordDialog extends JDialog {
                     get();
 
                     showMessage(
-                            "If the account is registered, its reset request "
-                                    + "is now waiting for ICT approval.",
+                            "Identity verified. The reset request is now waiting "
+                                    + "for authorized approval.",
                             "Request submitted"
                     );
 
@@ -871,17 +882,19 @@ public class ForgotPasswordDialog extends JDialog {
 
         String enteredIdentity =
                 identity.getText().trim();
+        String enteredEmail =
+                registeredEmail.getText().trim();
 
         char[] password = newPassword.getPassword();
         char[] confirmation = confirmPassword.getPassword();
 
-        if (enteredIdentity.isEmpty()) {
+        if (enteredIdentity.isEmpty() || enteredEmail.isEmpty()) {
 
             Arrays.fill(password, '\0');
             Arrays.fill(confirmation, '\0');
 
             showMessage(
-                    "Enter your username or email first.",
+                    "Enter your username or email and registered email.",
                     "Missing information"
             );
 
@@ -912,6 +925,7 @@ public class ForgotPasswordDialog extends JDialog {
 
                 authController.resetPasswordAfterApproval(
                         enteredIdentity,
+                        enteredEmail,
                         password
                 );
 
@@ -962,6 +976,7 @@ public class ForgotPasswordDialog extends JDialog {
         resetButton.setEnabled(!busy);
 
         identity.setEnabled(!busy);
+        registeredEmail.setEnabled(!busy);
         newPassword.setEnabled(!busy);
         confirmPassword.setEnabled(!busy);
     }
@@ -974,7 +989,7 @@ public class ForgotPasswordDialog extends JDialog {
             String message,
             String title) {
 
-        JOptionPane.showMessageDialog(
+        UiSupport.showMessageDialog(
                 this,
                 message,
                 title,
@@ -992,7 +1007,7 @@ public class ForgotPasswordDialog extends JDialog {
                         ? exception.getCause()
                         : exception;
 
-        JOptionPane.showMessageDialog(
+        UiSupport.showMessageDialog(
                 this,
                 cause.getMessage(),
                 title,

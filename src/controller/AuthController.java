@@ -61,19 +61,23 @@ public class AuthController {
         authService.changePassword(userId, currentPassword, newPassword);
     }
 
-    public void requestPasswordReset(String usernameOrEmail) throws Exception {
-        authService.requestPasswordReset(usernameOrEmail);
+    public void updateNotificationPreference(long userId, boolean enabled) throws Exception {
+        authService.updateNotificationPreference(userId, enabled);
+    }
+
+    public void requestPasswordReset(String usernameOrEmail, String registeredEmail) throws Exception {
+        authService.requestPasswordReset(usernameOrEmail, registeredEmail);
     }
 
     public void resetPasswordAfterApproval(
-            String usernameOrEmail, char[] newPassword) throws Exception {
-        authService.resetPasswordAfterApproval(usernameOrEmail, newPassword);
+            String usernameOrEmail, String registeredEmail, char[] newPassword) throws Exception {
+        authService.resetPasswordAfterApproval(usernameOrEmail, registeredEmail, newPassword);
     }
 
     public List<PasswordResetRequest> findPasswordResetRequests(User actor)
             throws Exception {
         if (actor == null) {
-            throw new SecurityException("A signed-in ICT account is required.");
+            throw new SecurityException("A signed-in authorized account is required.");
         }
         return authService.findPasswordResetRequests(actor.getRole());
     }
@@ -81,7 +85,7 @@ public class AuthController {
     public void reviewPasswordReset(
             User actor, long requestId, boolean approve, String note) throws Exception {
         if (actor == null) {
-            throw new SecurityException("A signed-in ICT account is required.");
+            throw new SecurityException("A signed-in authorized account is required.");
         }
         authService.reviewPasswordReset(
                 actor.getRole(), actor.getUserId(), requestId, approve, note);

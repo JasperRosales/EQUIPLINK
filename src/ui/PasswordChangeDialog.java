@@ -640,7 +640,7 @@ public class PasswordChangeDialog extends JDialog {
 
             clear(current, next, confirmation);
 
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     this,
                     "Complete all password fields.",
                     "Missing information",
@@ -654,7 +654,7 @@ public class PasswordChangeDialog extends JDialog {
 
             clear(current, next, confirmation);
 
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     this,
                     "The new password must be at least 8 characters.",
                     "Password too short",
@@ -670,7 +670,7 @@ public class PasswordChangeDialog extends JDialog {
 
             confirmPassword.setText("");
 
-            JOptionPane.showMessageDialog(
+            UiSupport.showMessageDialog(
                     this,
                     "The new passwords do not match.",
                     "Password mismatch",
@@ -719,7 +719,7 @@ public class PasswordChangeDialog extends JDialog {
 
                     get();
 
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             PasswordChangeDialog.this,
                             "Your password was updated.",
                             "Password updated",
@@ -735,7 +735,7 @@ public class PasswordChangeDialog extends JDialog {
                                     ? exception
                                     : exception.getCause();
 
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             PasswordChangeDialog.this,
                             cause.getMessage(),
                             "Unable to update password",

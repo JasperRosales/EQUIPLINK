@@ -22,8 +22,11 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Button that filters lists by event date. Opens a popup with quick presets and a
@@ -34,8 +37,11 @@ public class DateFilter extends PrimaryButton {
     private static final DateTimeFormatter SHORT = DateTimeFormatter.ofPattern("MMM d");
     private static final DateTimeFormatter LONG = DateTimeFormatter.ofPattern("MMM d, yyyy");
     private static final ZoneId MANILA = ZoneId.of("Asia/Manila");
+    /** The single highlight colour used for every date that has at least one request. */
+    private static final Color REQUEST_DAY_BLUE = new Color(70, 120, 210);
 
     private final List<Runnable> listeners = new ArrayList<>();
+    private final Set<LocalDate> requestDays = new HashSet<>();
     private final JPopupMenu popup = new JPopupMenu();
     private final JPanel grid = new JPanel(new GridLayout(0, 7, 2, 2));
     private final JLabel monthLabel = new JLabel("", SwingConstants.CENTER);
@@ -57,7 +63,7 @@ public class DateFilter extends PrimaryButton {
         setIcon(new ChevronIcon());
         setHorizontalTextPosition(LEFT);
         setIconTextGap(8);
-        setToolTipText("Filter by date");
+        setToolTipText("Filter by event date");
         buildPopup();
         addActionListener(event -> {
             shownMonth = from == null ? YearMonth.from(today()) : YearMonth.from(from);
@@ -88,6 +94,39 @@ public class DateFilter extends PrimaryButton {
         listeners.add(listener);
     }
 
+    /**
+     * Highlights dates that have at least one request. Only the date matters — request
+     * status never changes the highlight colour.
+     */
+    public void setRequestDays(Collection<LocalDate> days) {
+        requestDays.clear();
+        if (days != null) {
+            for (LocalDate date : days) {
+                if (date != null) {
+                    requestDays.add(date);
+                }
+            }
+        }
+        if (popup.isVisible()) {
+            renderMonth();
+        }
+    }
+
+    /** Clears the selected date/range and shows today's month again (Refresh action). */
+    public void resetToToday() {
+        from = null;
+        to = null;
+        pendingStart = null;
+        label = "All dates";
+        shownMonth = YearMonth.from(today());
+        hint.setText("Click a day, or two days for a range.");
+        updateText();
+        renderMonth();
+        for (Runnable listener : listeners) {
+            listener.run();
+        }
+    }
+
     public void clear() {
         apply(null, null, "All dates");
     }
@@ -103,9 +142,6 @@ public class DateFilter extends PrimaryButton {
         addPreset(presets, "All dates", null, null);
         addPreset(presets, "Today", today, today);
         addPreset(presets, "Next 7 days", today, today.plusDays(6));
-        addPreset(presets, "This week",
-                today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
-                today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY)));
         addPreset(presets, "This month",
                 today.withDayOfMonth(1), today.with(TemporalAdjusters.lastDayOfMonth()));
         addPreset(presets, "Upcoming", today, null);
@@ -200,14 +236,21 @@ public class DateFilter extends PrimaryButton {
             boolean selected = date.equals(pendingStart)
                     || (pendingStart == null && from != null && to != null
                             && !date.isBefore(from) && !date.isAfter(to));
+            boolean hasRequest = requestDays.contains(date);
             if (selected) {
                 cell.setBackground(AppTheme.primary());
                 cell.setForeground(Color.WHITE);
                 cell.setFont(AppTheme.semibold(12));
+            } else if (hasRequest) {
+                cell.setBackground(AppTheme.mix(AppTheme.surface(), REQUEST_DAY_BLUE, 0.24f));
+                cell.setForeground(REQUEST_DAY_BLUE.darker());
+                cell.setFont(AppTheme.semibold(12));
+                cell.setBorder(BorderFactory.createLineBorder(REQUEST_DAY_BLUE, 2, true));
+                cell.setToolTipText("Requests scheduled on " + date.format(LONG));
             } else {
                 cell.putClientProperty("JButton.buttonType", "borderless");
                 if (date.equals(today)) {
-                    cell.setForeground(AppTheme.primary());
+                    cell.setForeground(REQUEST_DAY_BLUE);
                     cell.setFont(AppTheme.semibold(12));
                 }
             }

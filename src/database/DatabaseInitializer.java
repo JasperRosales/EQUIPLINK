@@ -32,6 +32,7 @@ public final class DatabaseInitializer {
                         full_name VARCHAR(150) NOT NULL,
                         department VARCHAR(120),
                         active BOOLEAN NOT NULL DEFAULT TRUE,
+                        notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
                         CONSTRAINT borrower_type_rule CHECK (
@@ -43,6 +44,8 @@ public final class DatabaseInitializer {
                         )
                     )
                     """,
+
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE",
 
             """
                     CREATE TABLE IF NOT EXISTS password_reset_requests (
@@ -360,13 +363,16 @@ public final class DatabaseInitializer {
             // Independent department (ICT / Facility) decisions
             "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS declined_by BIGINT REFERENCES users(user_id)",
             "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS declined_at TIMESTAMP",
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS received_by BIGINT REFERENCES users(user_id)",
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS received_at TIMESTAMP",
             "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS overdue_notified BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE request_groups ADD COLUMN IF NOT EXISTS return_notified BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE request_groups DROP CONSTRAINT IF EXISTS request_groups_status_check",
             """
                     ALTER TABLE request_groups ADD CONSTRAINT request_groups_status_check
                     CHECK (status IN (
-                        'PENDING', 'ASSIGNED', 'UNABLE', 'RELEASED', 'RETURNED',
-                        'DECLINED', 'CANCELLED', 'NOT_REQUIRED'
+                        'PENDING', 'ASSIGNED', 'UNABLE', 'RELEASED', 'RECEIVED',
+                        'RETURNED', 'DECLINED', 'CANCELLED', 'NOT_REQUIRED'
                     ))
                     """,
             "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS overdue_notified BOOLEAN NOT NULL DEFAULT FALSE",
@@ -377,7 +383,20 @@ public final class DatabaseInitializer {
             "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMP",
             "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_before_delete BOOLEAN",
             "CREATE INDEX IF NOT EXISTS idx_notifications_user_visible ON notifications(user_id, is_deleted, created_at)",
+
+            // Recoverable request deletion: rows stay in the database until the
+            // undo window expires, and the original stage is kept for restores.
+            "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+            "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS deleted_by BIGINT REFERENCES users(user_id)",
+            "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS deletion_reason TEXT",
+            "ALTER TABLE borrow_requests ADD COLUMN IF NOT EXISTS status_before_delete VARCHAR(30)",
+            "CREATE INDEX IF NOT EXISTS idx_requests_deleted_at ON borrow_requests(deleted_at)",
+
+            // Password recovery: registered email plus elevated reviewer verification
+            "ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS registered_email_match BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS identity_verified BOOLEAN NOT NULL DEFAULT FALSE",
             "CREATE INDEX IF NOT EXISTS idx_history_latest ON request_history(history_id)",
 
             // INDEXES

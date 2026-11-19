@@ -1,17 +1,55 @@
 package src.ui;
 
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.KeyboardFocusManager;
+import java.awt.Window;
 
 public final class UiSupport {
 
+    /** Client property used to keep one confirmation/action per button at a time. */
+    private static final String ACTION_RUNNING = "equiplink.action.running";
+
     private UiSupport() {
+    }
+
+    /**
+     * Guards an action button against double-clicks. Returns false when the same
+     * button already has a confirmation or background action in progress.
+     */
+    public static boolean beginAction(AbstractButton button) {
+        if (button == null) {
+            return true;
+        }
+        if (Boolean.TRUE.equals(button.getClientProperty(ACTION_RUNNING))) {
+            return false;
+        }
+        button.putClientProperty(ACTION_RUNNING, Boolean.TRUE);
+        button.setEnabled(false);
+        return true;
+    }
+
+    /** Re-enables a guarded button after cancellation, failure, or completion. */
+    public static void endAction(AbstractButton button) {
+        if (button == null) {
+            return;
+        }
+        button.putClientProperty(ACTION_RUNNING, null);
+        SwingUtilities.invokeLater(() -> button.setEnabled(true));
     }
 
     public static JScrollPane scroll(JComponent content) {
@@ -49,6 +87,85 @@ public final class UiSupport {
         };
     }
 
+    // ---- Centered dialogs -------------------------------------------------------
+    // JOptionPane's convenience methods center on their parent component, which can
+    // leave a confirmation off-centre when the window is wide. These wrappers always
+    // place the dialog in the middle of the screen and keep the same return values as
+    // the matching JOptionPane calls, so existing call sites need no other changes.
+
+    public static int showConfirmDialog(
+            Component parent, Object message, String title, int optionType, int messageType) {
+        return showDialog(parent, title, new JOptionPane(message, messageType, optionType));
+    }
+
+    public static void showMessageDialog(
+            Component parent, Object message, String title, int messageType) {
+        showDialog(parent, title, new JOptionPane(message, messageType, JOptionPane.DEFAULT_OPTION));
+    }
+
+    public static String showInputDialog(
+            Component parent, Object message, String title, int messageType) {
+        JTextField field = new JTextField(22);
+        Object[] prompt = { message, field };
+        JOptionPane pane = new JOptionPane(
+                prompt, messageType, JOptionPane.OK_CANCEL_OPTION);
+        SwingUtilities.invokeLater(field::requestFocusInWindow);
+        return showDialog(parent, title, pane) == JOptionPane.OK_OPTION
+                ? field.getText() : null;
+    }
+
+    /**
+     * Confirmation shown right after a recoverable delete. Returns 0 when Undo was
+     * chosen, 1 when the user dismissed it, and -1 if the dialog was closed.
+     */
+    public static int showUndoDialog(Component parent, String message, String title) {
+        Object[] options = { "Undo", "Dismiss" };
+        JOptionPane pane = new JOptionPane(message, JOptionPane.INFORMATION_MESSAGE,
+                JOptionPane.DEFAULT_OPTION, null, options, options[0]);
+        Object value = showRawDialog(parent, title, pane);
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(value)) {
+                return i;
+            }
+        }
+        return JOptionPane.CLOSED_OPTION;
+    }
+
+    private static int showDialog(Component parent, String title, JOptionPane pane) {
+        Object value = showRawDialog(parent, title, pane);
+        return value instanceof Integer ? (Integer) value : JOptionPane.CLOSED_OPTION;
+    }
+
+    private static Object showRawDialog(Component parent, String title, JOptionPane pane) {
+        Window owner = parent == null ? null : SwingUtilities.getWindowAncestor(parent);
+        if (owner == null) {
+            owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+        }
+        JDialog dialog;
+        if (owner instanceof Dialog) {
+            dialog = new JDialog((Dialog) owner, title, true);
+        } else if (owner instanceof Frame) {
+            dialog = new JDialog((Frame) owner, title, true);
+        } else {
+            dialog = new JDialog((Frame) null, title, true);
+        }
+        dialog.setContentPane(pane);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.setResizable(false);
+        pane.addPropertyChangeListener(JOptionPane.VALUE_PROPERTY, e -> {
+            Object v = pane.getValue();
+            if (v != null && v != JOptionPane.UNINITIALIZED_VALUE) {
+                dialog.setVisible(false);
+            }
+        });
+        dialog.pack();
+        dialog.setLocationRelativeTo(null); // centre of the screen, not the parent
+        dialog.setVisible(true);
+        Object value = pane.getValue();
+        dialog.dispose();
+        return value;
+    }
+
     public static Color statusColor(String status) {
         if (status == null) {
             return AppTheme.muted();
@@ -83,14 +200,17 @@ public final class UiSupport {
         if ("RELEASED".equals(status)) {
             return "Borrowed";
         }
+        if ("RECEIVED".equals(status)) {
+            return "Received";
+        }
         if ("PENDING_STAFF".equals(status)) {
             return "Staff review";
         }
         if ("PENDING_ADMIN".equals(status)) {
-            return "Admin review";
+            return "Awaiting Facility Admin Approval";
         }
         if ("PENDING_DIRECTOR".equals(status)) {
-            return "Director review";
+            return "Awaiting Campus Director Approval";
         }
         if ("REJECTED".equals(status)) {
             return "Declined";
@@ -130,9 +250,11 @@ public final class UiSupport {
             case "PENDING":
                 return "Pending";
             case "ASSIGNED":
-                return "Approved";
+                return "Accepted (Initial review)";
             case "RELEASED":
                 return "Released";
+            case "RECEIVED":
+                return "Received";
             case "RETURNED":
                 return "Returned";
             default:
@@ -141,6 +263,9 @@ public final class UiSupport {
     }
 
     public static java.awt.Color departmentStatusColor(String status) {
+        if ("ASSIGNED".equals(status)) {
+            return AppTheme.primary(); // not green; distinct from final approval
+        }
         if ("RELEASED".equals(status)) {
             return AppTheme.primary();
         }
@@ -178,8 +303,12 @@ public final class UiSupport {
             }
         }
         String stage = request.getStatus();
-        if ("PENDING_ADMIN".equals(stage) || "PENDING_DIRECTOR".equals(stage)) {
-            badges.add(new src.ui.components.StatusBadge(stage));
+        if ("PENDING_ADMIN".equals(stage)) {
+            badges.add(new src.ui.components.StatusBadge(
+                    "Awaiting Facility Admin Approval", AppTheme.warning()));
+        } else if ("PENDING_DIRECTOR".equals(stage)) {
+            badges.add(new src.ui.components.StatusBadge(
+                    "Awaiting Campus Director Approval", AppTheme.warning()));
         }
         badges.add(new src.ui.components.StatusBadge(request.getOverallStatus(scopeRole)));
         return badges;

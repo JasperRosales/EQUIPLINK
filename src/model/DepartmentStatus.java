@@ -20,6 +20,8 @@ public class DepartmentStatus {
     private final LocalDateTime decidedAt;
     private final String releasedByName;
     private final LocalDateTime releasedAt;
+    private final String receivedByName;
+    private final LocalDateTime receivedAt;
     private final String inspectedByName;
     private final LocalDateTime inspectedAt;
 
@@ -35,6 +37,8 @@ public class DepartmentStatus {
             LocalDateTime decidedAt,
             String releasedByName,
             LocalDateTime releasedAt,
+            String receivedByName,
+            LocalDateTime receivedAt,
             String inspectedByName,
             LocalDateTime inspectedAt) {
         this.groupId = groupId;
@@ -48,6 +52,8 @@ public class DepartmentStatus {
         this.decidedAt = decidedAt;
         this.releasedByName = releasedByName;
         this.releasedAt = releasedAt;
+        this.receivedByName = receivedByName;
+        this.receivedAt = receivedAt;
         this.inspectedByName = inspectedByName;
         this.inspectedAt = inspectedAt;
     }
@@ -63,6 +69,8 @@ public class DepartmentStatus {
     public LocalDateTime getDecidedAt() { return decidedAt; }
     public String getReleasedByName() { return releasedByName; }
     public LocalDateTime getReleasedAt() { return releasedAt; }
+    public String getReceivedByName() { return receivedByName; }
+    public LocalDateTime getReceivedAt() { return receivedAt; }
     public String getInspectedByName() { return inspectedByName; }
     public LocalDateTime getInspectedAt() { return inspectedAt; }
 

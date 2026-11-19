@@ -13,11 +13,14 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -26,6 +29,9 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -49,16 +55,29 @@ public class RequestDetailsDialog extends JDialog {
             "MMM d, yyyy · hh:mm a", Locale.ENGLISH);
 
     private final String scopeRole;
+    private final src.model.User actor;
+    private final src.controller.BorrowRequestController requestController;
 
     public RequestDetailsDialog(Window owner, BorrowRequest request) {
-        this(owner, request, null);
+        this(owner, request, null, null, null);
+    }
+
+    public RequestDetailsDialog(Window owner, BorrowRequest request, String scopeRole) {
+        this(owner, request, scopeRole, null, null);
     }
 
     /** @param scopeRole a custodian role to show only that department, or null for all. */
-    public RequestDetailsDialog(Window owner, BorrowRequest request, String scopeRole) {
+    public RequestDetailsDialog(
+            Window owner,
+            BorrowRequest request,
+            String scopeRole,
+            src.model.User actor,
+            src.controller.BorrowRequestController requestController) {
         super(owner, "Request details · " + request.getRequestCode(),
                 Dialog.ModalityType.APPLICATION_MODAL);
         this.scopeRole = scopeRole;
+        this.actor = actor;
+        this.requestController = requestController;
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
         JPanel content = new JPanel();
@@ -92,6 +111,7 @@ public class RequestDetailsDialog extends JDialog {
         activity.row("Position", request.getPosition());
         activity.row("Submitted", request.getSubmittedAt().format(STAMP));
         activity.row("Review stage", UiSupport.displayStatus(request.getStatus()));
+        activity.row("Approval progress", RequestStatus.approvalProgress(request, scopeRole));
         activity.row("Remarks", blankAsDash(request.getRemarks()));
         addSection(content, activity);
 
@@ -132,12 +152,19 @@ public class RequestDetailsDialog extends JDialog {
             }
         }
 
-        PrimaryButton close = new PrimaryButton("Close", PrimaryButton.Style.SECONDARY);
-        close.addActionListener(event -> dispose());
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         actions.setOpaque(false);
         actions.setBorder(new EmptyBorder(4, 0, 0, 0));
         actions.setAlignmentX(LEFT_ALIGNMENT);
+        if (requestController != null
+                && requestController.canExportRequestForm(actor, request)) {
+            PrimaryButton download = new PrimaryButton("Download request form");
+            download.setToolTipText("Download an official copy for physical documentation");
+            download.addActionListener(event -> exportRequestForm(request));
+            actions.add(download);
+        }
+        PrimaryButton close = new PrimaryButton("Close", PrimaryButton.Style.SECONDARY);
+        close.addActionListener(event -> dispose());
         actions.add(close);
         content.add(actions);
 
@@ -147,6 +174,120 @@ public class RequestDetailsDialog extends JDialog {
         pack();
         setMinimumSize(new Dimension(640, 520));
         setLocationRelativeTo(owner);
+    }
+
+    private void exportRequestForm(BorrowRequest request) {
+        try {
+            requestController.verifyRequestFormExport(actor, request);
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Save request form");
+            chooser.setSelectedFile(new File(safeFileName(request.getRequestCode()) + ".html"));
+            chooser.setFileFilter(new FileNameExtensionFilter("HTML document", "html"));
+            if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            File target = chooser.getSelectedFile();
+            if (!target.getName().toLowerCase(Locale.ROOT).endsWith(".html")) {
+                target = new File(target.getParentFile(), target.getName() + ".html");
+            }
+            Files.writeString(target.toPath(), requestFormHtml(request), StandardCharsets.UTF_8);
+            UiSupport.showMessageDialog(this,
+                    "Request form saved to:\n" + target.getAbsolutePath(),
+                    "Request form downloaded", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception exception) {
+            UiSupport.showMessageDialog(this,
+                    "Unable to download request form: " + exception.getMessage(),
+                    "Download failed", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private String requestFormHtml(BorrowRequest request) {
+        StringBuilder html = new StringBuilder("""
+                <!DOCTYPE html>
+                <html lang="en"><head><meta charset="UTF-8">
+                <title>EquipLink Request Form</title>
+                <style>
+                body { font-family: Arial, sans-serif; margin: 32px; color: #1b2b32; }
+                h1 { color: #0d6b7a; margin-bottom: 2px; }
+                h2 { margin-top: 26px; font-size: 15px; color: #0d6b7a; }
+                table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+                th, td { border: 1px solid #cbd8dd; padding: 7px 9px; text-align: left;
+                         font-size: 12px; vertical-align: top; }
+                th { background: #eef5f6; width: 180px; }
+                .note { color: #62757c; font-size: 11px; }
+                </style></head><body>
+                """);
+        html.append("<h1>EquipLink Request Form</h1>");
+        html.append("<p class=\"note\">Approved/completed request · Generated ")
+                .append(LocalDateTime.now().format(STAMP)).append("</p>");
+        html.append("<table>");
+        appendRow(html, "Request code", request.getRequestCode());
+        appendRow(html, "Requested by", request.getBorrowerName());
+        appendRow(html, "Venue", request.getVenue());
+        appendRow(html, "Event date", request.getEventDate().format(DATE_LONG));
+        appendRow(html, "Time", UiSupport.timeRange(request.getStartTime(), request.getEndTime()));
+        appendRow(html, "Participants", request.getParticipants());
+        appendRow(html, "Person in charge", request.getPersonInCharge());
+        appendRow(html, "Position", request.getPosition());
+        appendRow(html, "Submitted", request.getSubmittedAt().format(STAMP));
+        appendRow(html, "Review stage", UiSupport.displayStatus(request.getStatus()));
+        appendRow(html, "Remarks", request.getRemarks());
+        html.append("</table>");
+
+        html.append("<h2>Purpose</h2>");
+        html.append("<p>").append(escape(request.getPurpose())).append("</p>");
+
+        html.append("<h2>Schedules</h2><table><tr><th>Schedule</th><th>Date</th><th>Time</th><th>Venue</th></tr>");
+        int index = 1;
+        List<RequestOccurrence> occurrences = request.getOccurrences() == null
+                ? List.of() : request.getOccurrences();
+        if (occurrences.isEmpty()) {
+            html.append("<tr><td>").append(index++).append("</td><td>")
+                    .append(escape(request.getEventDate() == null ? "" : request.getEventDate().format(DATE)))
+                    .append("</td><td>")
+                    .append(escape(UiSupport.timeRange(request.getStartTime(), request.getEndTime())))
+                    .append("</td><td>").append(escape(request.getVenue())).append("</td></tr>");
+        }
+        for (RequestOccurrence occurrence : occurrences) {
+            html.append("<tr><td>").append(index++).append("</td><td>")
+                    .append(escape(occurrence.getEventDate().format(DATE)))
+                    .append("</td><td>")
+                    .append(escape(UiSupport.timeRange(occurrence.getStartTime(), occurrence.getEndTime())))
+                    .append("</td><td>").append(escape(occurrence.getVenue())).append("</td></tr>");
+        }
+        html.append("</table>");
+
+        html.append("<h2>Equipment</h2><table><tr><th>Department</th><th>Equipment</th>"
+                + "<th>Code</th><th>Requested</th><th>Assigned</th><th>Released</th><th>Returned</th></tr>");
+        for (EquipmentRequestItem item : request.getEquipmentItems()) {
+            html.append("<tr><td>")
+                    .append(escape(RequestStatus.departmentLabel(item.getCustodianRole())))
+                    .append("</td><td>").append(escape(item.getEquipmentName()))
+                    .append("</td><td>").append(escape(item.getEquipmentCode()))
+                    .append("</td><td>").append(item.getRequestedQuantity())
+                    .append("</td><td>").append(item.getAssignedQuantity())
+                    .append("</td><td>").append(item.getReleasedQuantity())
+                    .append("</td><td>").append(item.getReturnedQuantity())
+                    .append("</td></tr>");
+        }
+        html.append("</table></body></html>");
+        return html.toString();
+    }
+
+    private static void appendRow(StringBuilder html, String label, String value) {
+        html.append("<tr><th>").append(escape(label)).append("</th><td>")
+                .append(escape(value == null || value.isBlank() ? "—" : value))
+                .append("</td></tr>");
+    }
+
+    private static String escape(String value) {
+        return value == null ? "" : value.replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private static String safeFileName(String value) {
+        String safe = value == null ? "request-form" : value.replaceAll("[^A-Za-z0-9_-]", "-");
+        return safe.isBlank() ? "request-form" : safe;
     }
 
     /** Decision, remarks, release record, and equipment lines for one department. */

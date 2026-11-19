@@ -5,6 +5,7 @@ import src.model.Notification;
 import src.ui.components.DateFilter;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
+import src.util.UndoPolicy;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -22,10 +23,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 public class NotificationsPanel extends JPanel implements Refreshable {
 
@@ -40,11 +39,11 @@ public class NotificationsPanel extends JPanel implements Refreshable {
     private final PrimaryButton markAllRead = new PrimaryButton(
             "Mark all read", PrimaryButton.Style.SECONDARY);
     private final JTextField search = new JTextField(18);
-    private final JComboBox<String> categoryFilter = new JComboBox<>(new String[] { "All categories" });
     private final JComboBox<String> kindFilter = new JComboBox<>(
-            new String[] { "All kinds", "Request", "Borrowing & Returns", "Account" });
-    private final JComboBox<String> readFilter = new JComboBox<>(new String[] { "All", "Unread", "Read" });
-    private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first", "Category" });
+            new String[] { "All types", "Request", "Borrowing & Returns", "Account" });
+    private final JComboBox<String> readFilter = new JComboBox<>(
+            new String[] { "All notifications", "Unread", "Read" });
+    private final JComboBox<String> dateSort = new JComboBox<>(new String[] { "Newest first", "Oldest first" });
     private final DateFilter dateFilter = new DateFilter();
     private List<Notification> notifications = List.of();
 
@@ -122,16 +121,13 @@ public class NotificationsPanel extends JPanel implements Refreshable {
 
         JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         tools.setOpaque(false);
-        styleCombo(categoryFilter, 150);
         styleCombo(kindFilter, 150);
         styleCombo(readFilter, 110);
         styleCombo(dateSort, 140);
-        categoryFilter.addActionListener(event -> showNotifications());
         kindFilter.addActionListener(event -> showNotifications());
         readFilter.addActionListener(event -> showNotifications());
         dateSort.addActionListener(event -> showNotifications());
         dateFilter.addChangeListener(this::showNotifications);
-        tools.add(categoryFilter);
         tools.add(kindFilter);
         tools.add(readFilter);
         tools.add(dateFilter);
@@ -171,7 +167,6 @@ public class NotificationsPanel extends JPanel implements Refreshable {
             protected void done() {
                 try {
                     notifications = get();
-                    refreshCategoryFilter();
                     showNotifications();
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
@@ -184,26 +179,6 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                 }
             }
         }.execute();
-    }
-
-    private void refreshCategoryFilter() {
-        Object selected = categoryFilter.getSelectedItem();
-        Set<String> categories = new LinkedHashSet<>();
-        for (Notification notification : notifications) {
-            for (String category : splitValues(notification.getRequestCategories())) {
-                categories.add(category);
-            }
-        }
-        categoryFilter.removeAllItems();
-        categoryFilter.addItem("All categories");
-        categories.stream().sorted(String.CASE_INSENSITIVE_ORDER)
-                .forEach(categoryFilter::addItem);
-        if (selected != null) {
-            categoryFilter.setSelectedItem(selected);
-        }
-        if (categoryFilter.getSelectedIndex() < 0) {
-            categoryFilter.setSelectedIndex(0);
-        }
     }
 
     private void showNotifications() {
@@ -239,7 +214,6 @@ public class NotificationsPanel extends JPanel implements Refreshable {
 
     private List<Notification> filteredNotifications() {
         String query = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
-        String selectedCategory = String.valueOf(categoryFilter.getSelectedItem());
         String selectedKind = String.valueOf(kindFilter.getSelectedItem());
         String selectedRead = String.valueOf(readFilter.getSelectedItem());
         int sortMode = dateSort.getSelectedIndex();
@@ -253,8 +227,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
             }
             if (!query.isEmpty()) {
                 String haystack = (safe(n.getTitle()) + " " + safe(n.getMessage()) + " "
-                        + safe(n.getRequestEquipment()) + " " + safe(n.getRequestCategories()) + " "
-                        + safe(n.getCategoryLabel()) + " "
+                        + safe(n.getRequestEquipment()) + " " + safe(n.getCategoryLabel()) + " "
                         + safe(n.getRequestCode()) + " "
                         + src.model.RequestStatus.departmentLabel(n.getDepartment()))
                         .toLowerCase(Locale.ROOT);
@@ -262,16 +235,9 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                     continue;
                 }
             }
-            if (!"All kinds".equals(selectedKind)
+            if (!"All types".equals(selectedKind)
                     && !n.getCategoryLabel().equals(selectedKind)) {
                 continue;
-            }
-            if (selectedCategory != null && !"All categories".equals(selectedCategory)) {
-                boolean match = splitValues(n.getRequestCategories()).stream()
-                        .anyMatch(c -> c.equalsIgnoreCase(selectedCategory));
-                if (!match) {
-                    continue;
-                }
             }
             LocalDate createdDate = n.getCreatedAt() == null ? null : n.getCreatedAt().toLocalDate();
             if (!dateFilter.matches(createdDate)) {
@@ -279,34 +245,13 @@ public class NotificationsPanel extends JPanel implements Refreshable {
             }
             filtered.add(n);
         }
-        Comparator<Notification> cmp;
-        if (sortMode == 2) {
-            cmp = Comparator.comparing((Notification n) -> n.getCategoryLabel().toLowerCase(Locale.ROOT))
-                    .thenComparing(Comparator.comparing(Notification::getCreatedAt,
-                            Comparator.nullsLast(Comparator.naturalOrder())).reversed());
-        } else {
-            cmp = Comparator.comparing(Notification::getCreatedAt,
-                    Comparator.nullsLast(Comparator.naturalOrder()));
-            if (sortMode <= 0) {
-                cmp = cmp.reversed();
-            }
+        Comparator<Notification> cmp = Comparator.comparing(Notification::getCreatedAt,
+                Comparator.nullsLast(Comparator.naturalOrder()));
+        if (sortMode <= 0) {
+            cmp = cmp.reversed();
         }
         filtered.sort(cmp.thenComparing(Comparator.comparingLong(Notification::getNotificationId).reversed()));
         return filtered;
-    }
-
-    private List<String> splitValues(String csv) {
-        List<String> values = new ArrayList<>();
-        if (csv == null || csv.isBlank()) {
-            return values;
-        }
-        for (String part : csv.split(",")) {
-            String trimmed = part.trim();
-            if (!trimmed.isEmpty()) {
-                values.add(trimmed);
-            }
-        }
-        return values;
     }
 
     private String safe(String value) {
@@ -410,7 +355,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         }
         PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
         delete.setToolTipText("Remove this notification from your list");
-        delete.addActionListener(event -> deleteNotification(notification));
+        delete.addActionListener(event -> deleteNotification(notification, false, delete));
         actions.add(delete);
         card.add(body, BorderLayout.CENTER);
         card.add(actions, BorderLayout.EAST);
@@ -433,7 +378,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                 owner, notification,
                 notification.getRequestId() != null && requestController != null && user != null
                         ? () -> openRequest(notification.getRequestId()) : null,
-                () -> deleteNotification(notification));
+                () -> deleteNotification(notification, true, null));
         dialog.setVisible(true);
     }
 
@@ -452,11 +397,11 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                             ? role : null;
                     new RequestDetailsDialog(
                             javax.swing.SwingUtilities.getWindowAncestor(NotificationsPanel.this),
-                            get(), scope).setVisible(true);
+                            get(), scope, user, requestController).setVisible(true);
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
-                    JOptionPane.showMessageDialog(NotificationsPanel.this,
+                    UiSupport.showMessageDialog(NotificationsPanel.this,
                             cause.getMessage(), "Request unavailable",
                             JOptionPane.WARNING_MESSAGE);
                 }
@@ -464,24 +409,108 @@ public class NotificationsPanel extends JPanel implements Refreshable {
         }.execute();
     }
 
-    private void deleteNotification(Notification notification) {
-        runInBackground(() -> notificationController.delete(
-                userId, notification.getNotificationId()), "Unable to delete notification");
+    private void deleteNotification(
+            Notification notification, boolean confirmed, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        if (!confirmed) {
+            int answer = UiSupport.showConfirmDialog(this,
+                    "Delete this notification? The related request is not affected.\n"
+                            + "You can undo this for " + UndoPolicy.RECOVERY_LABEL + ".",
+                    "Delete notification", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (answer != JOptionPane.YES_OPTION) {
+                UiSupport.endAction(source);
+                return;
+            }
+        }
+        long notificationId = notification.getNotificationId();
+        runInBackground(() -> notificationController.delete(userId, notificationId),
+                "Unable to delete notification",
+                () -> offerUndo(List.of(notificationId), false), source);
     }
 
     private void deleteAllNotifications() {
-        int answer = JOptionPane.showConfirmDialog(this,
-                "Delete all " + notifications.size() + " notifications?\n"
-                        + "Your requests, approvals, releases, and history are not affected.",
+        if (!UiSupport.beginAction(deleteAll)) {
+            return;
+        }
+        List<Long> deletedIds = new ArrayList<>();
+        for (Notification notification : notifications) {
+            deletedIds.add(notification.getNotificationId());
+        }
+        int answer = UiSupport.showConfirmDialog(this,
+                "Delete all " + deletedIds.size() + " notifications?\n"
+                        + "Your requests, approvals, releases, and history are not affected.\n"
+                        + "You can undo this for " + UndoPolicy.RECOVERY_LABEL + ".",
                 "Delete all notifications", JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         if (answer == JOptionPane.YES_OPTION) {
             runInBackground(() -> notificationController.deleteAll(userId),
-                    "Unable to delete notifications");
+                    "Unable to delete notifications",
+                    () -> offerUndo(deletedIds, true), deleteAll);
+        } else {
+            UiSupport.endAction(deleteAll);
         }
     }
 
+    /**
+     * Offers Undo immediately after a successful delete. The service enforces the
+     * shared recovery window and puts every notification back with its original
+     * read/unread state.
+     */
+    private void offerUndo(List<Long> notificationIds, boolean all) {
+        if (notificationIds.isEmpty()) {
+            return;
+        }
+        String label = all
+                ? notificationIds.size() + " notifications were deleted."
+                : "Notification was deleted.";
+        int choice = UiSupport.showUndoDialog(this,
+                label + "\nUndo is available for " + UndoPolicy.RECOVERY_LABEL + ".",
+                "Notification deleted");
+        if (choice != 0) {
+            return;
+        }
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                if (notificationIds.size() == 1) {
+                    notificationController.restore(userId, notificationIds.get(0));
+                    return 1;
+                }
+                return notificationController.restoreAll(userId, notificationIds);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    int restored = get();
+                    reload(true);
+                    onChanged.run();
+                    UiSupport.showMessageDialog(NotificationsPanel.this,
+                            restored + (restored == 1
+                                    ? " notification was restored with its original read state."
+                                    : " notifications were restored with their original read states."),
+                            "Notification restored", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception exception) {
+                    Throwable cause = exception.getCause() == null
+                            ? exception : exception.getCause();
+                    UiSupport.showMessageDialog(NotificationsPanel.this,
+                            cause.getMessage(), "Unable to restore notifications",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
     private void runInBackground(ThrowingAction action, String errorTitle) {
+        runInBackground(action, errorTitle, null, null);
+    }
+
+    private void runInBackground(
+            ThrowingAction action, String errorTitle, Runnable onSuccess,
+            javax.swing.AbstractButton source) {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
@@ -495,11 +524,16 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                     get();
                     reload(true);
                     onChanged.run();
+                    if (onSuccess != null) {
+                        onSuccess.run();
+                    }
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
-                    JOptionPane.showMessageDialog(NotificationsPanel.this,
+                    UiSupport.showMessageDialog(NotificationsPanel.this,
                             cause.getMessage(), errorTitle, JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
                 }
             }
         }.execute();
@@ -527,7 +561,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                 } catch (Exception exception) {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             NotificationsPanel.this,
                             "Unable to update notification: " + cause.getMessage(),
                             "Notification update failed",
@@ -556,7 +590,7 @@ public class NotificationsPanel extends JPanel implements Refreshable {
                     Throwable cause = exception.getCause() == null
                             ? exception : exception.getCause();
                     markAllRead.setEnabled(true);
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             NotificationsPanel.this,
                             "Unable to mark notifications as read: " + cause.getMessage(),
                             "Notification update failed",

@@ -6,6 +6,7 @@ import src.model.DepartmentStatus;
 import src.model.EquipmentRequestItem;
 import src.model.RequestStatus;
 import src.model.User;
+import src.util.UndoPolicy;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
 
@@ -22,7 +23,9 @@ import java.awt.FlowLayout;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 public class RequestQueuePanel extends JPanel implements Refreshable {
@@ -47,7 +50,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
     private final javax.swing.JComboBox<String> priorityFilter = new javax.swing.JComboBox<>(
             new String[] { "All borrowers", "Faculty (priority)", "Students" });
     private final javax.swing.JComboBox<RequestStatus.Category> statusFilter =
-            new javax.swing.JComboBox<>(RequestStatus.Category.values());
+            new javax.swing.JComboBox<>();
     private final javax.swing.JComboBox<String> departmentFilter = new javax.swing.JComboBox<>(
             new String[] { "All departments", "ICT equipment", "Facility equipment" });
     private final javax.swing.JComboBox<String> decisionFilter = new javax.swing.JComboBox<>(
@@ -73,8 +76,12 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         this.requestController = requestController;
         this.mode = mode;
         this.scopeRole = isStaffActor(actor) ? actor.getRole().toUpperCase() : null;
+        statusFilter.setModel(new javax.swing.DefaultComboBoxModel<>(
+                statusCategoriesFor(mode)));
         if (initialFilter != null) {
-            statusFilter.setSelectedItem(RequestStatus.Category.fromLabel(initialFilter));
+            RequestStatus.Category initial = RequestStatus.Category.fromLabel(initialFilter);
+            statusFilter.setSelectedItem(
+                    statusCategoriesContains(mode, initial) ? initial : RequestStatus.Category.ALL);
         }
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(AppTheme.background());
@@ -121,18 +128,30 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         tools.add(dateFilter);
         tools.add(dateSort);
         PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
-        refresh.addActionListener(event -> loadRequests(false));
+        refresh.setToolTipText("Reload requests and return the calendar to today");
+        refresh.addActionListener(event -> {
+            dateFilter.resetToToday();
+            loadRequests(false);
+        });
         tools.add(refresh);
         filters.add(tools, BorderLayout.EAST);
 
         JPanel statusRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         statusRow.setOpaque(false);
-        styleCombo(statusFilter, 200, "Filter by overall request status");
-        statusRow.add(statusFilter);
-        if (scopeRole == null) {
-            styleCombo(departmentFilter, 165, "Filter by department");
+        if (mode != Mode.SCHEDULE_ASSIGNMENT && mode != Mode.DIRECTOR_REVIEW) {
+            styleCombo(statusFilter, 200, "Filter by overall request status");
+            statusRow.add(statusFilter);
+        }
+        if (mode == Mode.ALL_REQUESTS
+                || (mode == Mode.TRANSACTION_HISTORY && !isStaffActor(actor))) {
+            // Admin/Director transaction history keeps the department/decision tools
+            // from the former All Requests page; staff history stays department-scoped.
+            styleCombo(departmentFilter, 165, "Filter by custodian department");
             styleCombo(decisionFilter, 225, "Filter by the department's own decision");
             statusRow.add(departmentFilter);
+            statusRow.add(decisionFilter);
+        } else if (mode == Mode.ADMIN_REVIEW) {
+            styleCombo(decisionFilter, 225, "Filter by the department's own decision");
             statusRow.add(decisionFilter);
         }
         styleCombo(priorityFilter, 165, "Filter by borrower type");
@@ -188,7 +207,9 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
                     case SCHEDULE_ASSIGNMENT:
                         return requestController.findScheduleForRole(actor);
                     case TRANSACTION_HISTORY:
-                        return requestController.findHistoryForRole(actor);
+                        return isStaffActor(actor)
+                                ? requestController.findHistoryForRole(actor)
+                                : requestController.findAllRequests(actor);
                     case ALL_REQUESTS:
                     default:
                         return requestController.findAllRequests(actor);
@@ -210,6 +231,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
 
     private void showRequests() {
         requestList.removeAll();
+        dateFilter.setRequestDays(buildRequestDates());
         String query = search.getText().trim().toLowerCase();
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
@@ -245,6 +267,28 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         requestList.repaint();
     }
 
+    /** Every date with at least one request; status never affects the blue highlight. */
+    private Set<java.time.LocalDate> buildRequestDates() {
+        Set<java.time.LocalDate> days = new HashSet<>();
+        for (BorrowRequest request : requests) {
+            List<src.model.RequestOccurrence> occurrences = request.getOccurrences();
+            if (occurrences == null || occurrences.isEmpty()) {
+                addRequestDate(days, request.getEventDate());
+                continue;
+            }
+            for (src.model.RequestOccurrence occurrence : occurrences) {
+                addRequestDate(days, occurrence.getEventDate());
+            }
+        }
+        return days;
+    }
+
+    private static void addRequestDate(Set<java.time.LocalDate> days, java.time.LocalDate date) {
+        if (date != null) {
+            days.add(date);
+        }
+    }
+
     private boolean matchesPriority(BorrowRequest request) {
         switch (priorityFilter.getSelectedIndex()) {
             case 1:
@@ -257,6 +301,9 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
     }
 
     private boolean matchesStatus(BorrowRequest request) {
+        if (mode == Mode.SCHEDULE_ASSIGNMENT || mode == Mode.DIRECTOR_REVIEW) {
+            return true;
+        }
         RequestStatus.Category category =
                 (RequestStatus.Category) statusFilter.getSelectedItem();
         return category == null || category.matches(request, scopeRole);
@@ -394,6 +441,14 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         details.add(meta);
         details.add(Box.createVerticalStrut(4));
         details.add(itemLine);
+        if (mode == Mode.TRANSACTION_HISTORY) {
+            JLabel approval = new JLabel(
+                    "Approval progress: " + RequestStatus.approvalProgress(request, scopeRole));
+            approval.setFont(AppTheme.regular(10));
+            approval.setForeground(AppTheme.muted());
+            details.add(Box.createVerticalStrut(4));
+            details.add(approval);
+        }
         String remarks = departmentRemarks(request);
         if (!remarks.isEmpty()) {
             JLabel remarksLine = new JLabel("<html>" + remarks + "</html>");
@@ -408,7 +463,8 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         actions.setOpaque(false);
         PrimaryButton view = new PrimaryButton("View details", PrimaryButton.Style.SECONDARY);
         view.addActionListener(event -> new RequestDetailsDialog(
-                javax.swing.SwingUtilities.getWindowAncestor(this), request, scopeRole)
+                javax.swing.SwingUtilities.getWindowAncestor(this), request, scopeRole,
+                actor, requestController)
                 .setVisible(true));
         actions.add(view);
         addModeActions(actions, request);
@@ -418,45 +474,50 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
 
     private void addModeActions(JPanel actions, BorrowRequest request) {
         if (mode == Mode.STAFF_QUEUE) {
-            if (!hasOwnGroup(request, "PENDING")) {
-                return;
+            if (hasOwnGroup(request, "PENDING")) {
+                PrimaryButton approve = new PrimaryButton("Accept");
+                approve.setToolTipText("Accept and assign your department's equipment");
+                approve.addActionListener(event -> assignRequest(request, approve));
+                PrimaryButton decline = new PrimaryButton("Decline", PrimaryButton.Style.DANGER);
+                decline.setToolTipText("Decline only your department's equipment");
+                decline.addActionListener(event -> declineRequest(request, decline));
+                // Requirement III.3: remove "Request Changes" from ICT System Admin Request section
+                actions.add(approve);
+                actions.add(decline);
             }
-            PrimaryButton approve = new PrimaryButton("Approve");
-            approve.setToolTipText("Approve and assign your department's equipment");
-            approve.addActionListener(event -> assignRequest(request));
-            PrimaryButton decline = new PrimaryButton("Decline", PrimaryButton.Style.DANGER);
-            decline.setToolTipText("Decline only your department's equipment");
-            decline.addActionListener(event -> declineRequest(request));
-            PrimaryButton needsAction = new PrimaryButton(
-                    "Request changes", PrimaryButton.Style.SECONDARY);
-            needsAction.addActionListener(event -> requestChanges(request));
-            actions.add(approve);
-            actions.add(decline);
-            actions.add(needsAction);
         } else if (mode == Mode.ADMIN_REVIEW || mode == Mode.DIRECTOR_REVIEW) {
             PrimaryButton approve = new PrimaryButton("Approve");
-            approve.addActionListener(event -> reviewRequest(request, true));
+            approve.addActionListener(event -> reviewRequest(request, true, approve));
             PrimaryButton reject = new PrimaryButton("Decline", PrimaryButton.Style.DANGER);
-            reject.addActionListener(event -> reviewRequest(request, false));
+            reject.addActionListener(event -> reviewRequest(request, false, reject));
             actions.add(approve);
             actions.add(reject);
-        } else if (mode == Mode.SCHEDULE_ASSIGNMENT) {
-            // Each department checks only its own records, so the other department's
-            // decline or earlier release never hides these buttons.
-            boolean finalApproved = "APPROVED".equals(request.getStatus())
-                    || "RELEASED".equals(request.getStatus());
-            if (finalApproved && hasOwnGroup(request, "ASSIGNED")) {
+        } else if (mode == Mode.SCHEDULE_ASSIGNMENT || mode == Mode.TRANSACTION_HISTORY) {
+            boolean finalApproved = RequestStatus.isFinalApprovalGranted(request);
+            if (mode == Mode.SCHEDULE_ASSIGNMENT && finalApproved
+                    && hasOwnGroup(request, "ASSIGNED")
+                    && hasProcessableGroup(request, "ASSIGNED", false)) {
                 PrimaryButton release = new PrimaryButton(
                         RequestStatus.departmentLabel(actor.getRole()) + " release");
-                release.addActionListener(event -> updateTransaction(request, true));
+                release.addActionListener(event -> updateTransaction(request, true, release));
                 actions.add(release);
             }
-            if (hasOwnGroup(request, "RELEASED")) {
+            if (canInspectReturn(request)) {
                 PrimaryButton returned = new PrimaryButton(
                         "Inspect return", PrimaryButton.Style.SECONDARY);
-                returned.addActionListener(event -> updateTransaction(request, false));
+                returned.setToolTipText(
+                        "Inspect the returned equipment after the borrower confirms receipt");
+                returned.addActionListener(event -> updateTransaction(request, false, returned));
                 actions.add(returned);
             }
+        }
+        // Requirement III.3: keep Delete only in Transaction History (and allowed contexts)
+        if (isIctAdmin() && !"CANCELLED".equals(request.getStatus())
+                && mode == Mode.TRANSACTION_HISTORY) {
+            PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
+            delete.setToolTipText("Delete this request (ICT System Admin only)");
+            delete.addActionListener(event -> deleteAsAdmin(request, delete));
+            actions.add(delete);
         }
     }
 
@@ -468,6 +529,119 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
             }
         }
         return false;
+    }
+
+    /** Staff may inspect only once the borrower has confirmed receipt (RECEIVED). */
+    private boolean canInspectReturn(BorrowRequest request) {
+        return isStaffActor(actor)
+                && hasOwnGroup(request, "RECEIVED")
+                && hasProcessableGroup(request, "RECEIVED", true);
+    }
+
+    /** True when one of this department's groups has reached its scheduled date. */
+    private boolean hasProcessableGroup(BorrowRequest request, String status, boolean useEnd) {
+        if (scopeRole == null) {
+            return false;
+        }
+        for (DepartmentStatus department : request.getDepartments()) {
+            if (!scopeRole.equalsIgnoreCase(department.getCustodianRole())
+                    || !status.equals(department.getStatus())) {
+                continue;
+            }
+            java.time.LocalDateTime boundary = useEnd
+                    ? department.getScheduleEnd() : department.getScheduleStart();
+            if (boundary == null
+                    || !boundary.toLocalDate().isAfter(src.ui.components.DateFilter.today())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isIctAdmin() {
+        return actor != null && "ICT_STAFF".equalsIgnoreCase(actor.getRole());
+    }
+
+    private void deleteAsAdmin(BorrowRequest request, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        long requestId = request.getRequestId();
+        String label = requestLabel(request);
+        int answer = UiSupport.showConfirmDialog(this,
+                "Delete request " + label + "?\n"
+                        + "It will be removed from all request lists and kept for audit. "
+                        + "You can undo for " + UndoPolicy.RECOVERY_LABEL + ".",
+                "Delete request", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.YES_OPTION) {
+            UiSupport.endAction(source);
+            return;
+        }
+        String reason = UiSupport.showInputDialog(this,
+                "Reason for deleting request " + label + ":",
+                "Delete request", JOptionPane.QUESTION_MESSAGE);
+        if (reason == null || reason.isBlank()) {
+            UiSupport.endAction(source);
+            return;
+        }
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                requestController.deleteRequestAsAdmin(actor, requestId, reason);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    loadRequests();
+                    offerAdminUndo(label, requestId);
+                } catch (Exception exception) {
+                    UiSupport.showMessageDialog(RequestQueuePanel.this,
+                            messageOf(exception), "Unable to delete request",
+                            JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
+                }
+            }
+        }.execute();
+    }
+
+    private void offerAdminUndo(String label, long requestId) {
+        int choice = UiSupport.showUndoDialog(this,
+                label + " was deleted.\nUndo is available for " + UndoPolicy.RECOVERY_LABEL + ".",
+                "Request deleted");
+        if (choice != 0) {
+            return;
+        }
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                requestController.restoreRequestAsAdmin(actor, requestId);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    loadRequests();
+                    UiSupport.showMessageDialog(RequestQueuePanel.this,
+                            label + " was restored with its original status.",
+                            "Request restored", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception exception) {
+                    UiSupport.showMessageDialog(RequestQueuePanel.this,
+                            messageOf(exception), "Unable to restore request",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private String requestLabel(BorrowRequest request) {
+        return request.getRequestCode() == null
+                ? "#" + request.getRequestId() : request.getRequestCode();
     }
 
     /** Department remarks (e.g. decline reasons) visible to this view. */
@@ -497,65 +671,86 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    private void declineRequest(BorrowRequest request) {
-        String remarks = JOptionPane.showInputDialog(
+    private void declineRequest(BorrowRequest request, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        String remarks = UiSupport.showInputDialog(
                 this, "Reason for declining your department's equipment:",
                 "Decline " + RequestStatus.departmentLabel(actor.getRole()) + " equipment",
                 JOptionPane.WARNING_MESSAGE);
         if (remarks == null) {
+            UiSupport.endAction(source);
             return;
         }
         if (remarks.isBlank()) {
-            JOptionPane.showMessageDialog(
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(
                     this, "Enter a reason for declining.",
                     "Reason required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         runAction("Unable to decline request", () ->
-                requestController.declineStaffRequest(actor, request.getRequestId(), remarks));
+                requestController.declineStaffRequest(actor, request.getRequestId(), remarks),
+                source);
     }
 
-    private void assignRequest(BorrowRequest request) {
+    private void assignRequest(BorrowRequest request, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
         List<src.model.ItemInspection> assignments = ItemInspectionDialog.show(
                 this, request, actor.getRole(), ItemInspectionDialog.Kind.ASSIGN);
         if (assignments == null) {
+            UiSupport.endAction(source);
             return;
         }
         runAction("Unable to assign equipment", () ->
                 requestController.assignStaffRequest(
-                        actor, request.getRequestId(), assignments));
+                        actor, request.getRequestId(), assignments), source);
     }
 
-    private void requestChanges(BorrowRequest request) {
-        String remarks = JOptionPane.showInputDialog(
+    private void requestChanges(BorrowRequest request, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        String remarks = UiSupport.showInputDialog(
                 this, "Explain what the borrower needs to change:",
                 "Request changes", JOptionPane.QUESTION_MESSAGE);
         if (remarks == null) {
+            UiSupport.endAction(source);
             return;
         }
         if (remarks.isBlank()) {
-            JOptionPane.showMessageDialog(
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(
                     this, "Enter a reason for the requested changes.",
                     "Reason required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         runAction("Unable to update request", () ->
                 requestController.markStaffRequestNeedsAction(
-                        actor, request.getRequestId(), remarks));
+                        actor, request.getRequestId(), remarks), source);
     }
 
-    private void reviewRequest(BorrowRequest request, boolean approve) {
+    private void reviewRequest(
+            BorrowRequest request, boolean approve, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
         String prompt = approve
                 ? "Optional remarks:"
                 : "Reason for declining this request:";
-        String remarks = JOptionPane.showInputDialog(
+        String remarks = UiSupport.showInputDialog(
                 this, prompt, approve ? "Approve request" : "Decline request",
                 JOptionPane.QUESTION_MESSAGE);
         if (remarks == null) {
+            UiSupport.endAction(source);
             return;
         }
         if (!approve && remarks.isBlank()) {
-            JOptionPane.showMessageDialog(
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(
                     this, "Enter a reason before declining.",
                     "Reason required", JOptionPane.WARNING_MESSAGE);
             return;
@@ -568,14 +763,19 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
                 requestController.reviewByDirector(
                         actor, request.getRequestId(), approve, remarks);
             }
-        });
+        }, source);
     }
 
-    private void updateTransaction(BorrowRequest request, boolean release) {
+    private void updateTransaction(
+            BorrowRequest request, boolean release, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
         List<src.model.ItemInspection> inspections = ItemInspectionDialog.show(
                 this, request, actor.getRole(),
                 release ? ItemInspectionDialog.Kind.RELEASE : ItemInspectionDialog.Kind.RETURN);
         if (inspections == null) {
+            UiSupport.endAction(source);
             return;
         }
         runAction(
@@ -588,7 +788,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
                         requestController.recordStaffReturn(
                                 actor, request.getRequestId(), inspections);
                     }
-                });
+                }, source);
     }
 
     private boolean isActorItem(EquipmentRequestItem item, String groupStatus) {
@@ -599,8 +799,8 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
     private String equipmentSummary(BorrowRequest request) {
         StringBuilder summary = new StringBuilder();
         for (EquipmentRequestItem item : request.getEquipmentItems()) {
-            if (mode == Mode.STAFF_QUEUE || mode == Mode.SCHEDULE_ASSIGNMENT
-                    || mode == Mode.TRANSACTION_HISTORY) {
+            if ((mode == Mode.STAFF_QUEUE || mode == Mode.SCHEDULE_ASSIGNMENT
+                    || mode == Mode.TRANSACTION_HISTORY) && isStaffActor(actor)) {
                 if (!actor.getRole().equalsIgnoreCase(item.getCustodianRole())) {
                     continue;
                 }
@@ -618,7 +818,8 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         return summary.length() == 0 ? "No equipment items" : summary.toString();
     }
 
-    private void runAction(String errorTitle, ThrowingAction action) {
+    private void runAction(
+            String errorTitle, ThrowingAction action, javax.swing.AbstractButton source) {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
@@ -632,9 +833,11 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
                     get();
                     loadRequests();
                 } catch (Exception exception) {
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             RequestQueuePanel.this, messageOf(exception),
                             errorTitle, JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
                 }
             }
         }.execute();
@@ -655,6 +858,62 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         requestList.add(message(text, error));
         requestList.revalidate();
         requestList.repaint();
+    }
+
+    private static RequestStatus.Category[] statusCategoriesFor(Mode mode) {
+        return switch (mode) {
+            case STAFF_QUEUE -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.PENDING,
+                    RequestStatus.Category.APPROVED, RequestStatus.Category.PARTIALLY_RELEASED,
+                    RequestStatus.Category.COMPLETED, RequestStatus.Category.OVERDUE,
+                    RequestStatus.Category.NEEDS_ACTION, RequestStatus.Category.DECLINED,
+                    RequestStatus.Category.CANCELLED
+            };
+            case SCHEDULE_ASSIGNMENT -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.PENDING,
+                    RequestStatus.Category.APPROVED, RequestStatus.Category.PARTIALLY_RELEASED,
+                    RequestStatus.Category.OVERDUE, RequestStatus.Category.NEEDS_ACTION,
+                    RequestStatus.Category.DECLINED, RequestStatus.Category.CANCELLED
+            };
+            case TRANSACTION_HISTORY -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.PENDING,
+                    RequestStatus.Category.APPROVED, RequestStatus.Category.PARTIALLY_APPROVED,
+                    RequestStatus.Category.FULLY_APPROVED,
+                    RequestStatus.Category.PARTIALLY_RELEASED,
+                    RequestStatus.Category.FULLY_RELEASED,
+                    RequestStatus.Category.COMPLETED, RequestStatus.Category.DECLINED,
+                    RequestStatus.Category.OVERDUE, RequestStatus.Category.NEEDS_ACTION,
+                    RequestStatus.Category.ADMIN_REVIEW, RequestStatus.Category.DIRECTOR_REVIEW,
+                    RequestStatus.Category.FINAL_APPROVED, RequestStatus.Category.CANCELLED
+            };
+            case ADMIN_REVIEW -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.ADMIN_REVIEW,
+                    RequestStatus.Category.PENDING, RequestStatus.Category.APPROVED,
+                    RequestStatus.Category.DECLINED, RequestStatus.Category.NEEDS_ACTION,
+                    RequestStatus.Category.OVERDUE, RequestStatus.Category.CANCELLED
+            };
+            case DIRECTOR_REVIEW -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.DIRECTOR_REVIEW,
+                    RequestStatus.Category.FINAL_APPROVED, RequestStatus.Category.PENDING,
+                    RequestStatus.Category.DECLINED, RequestStatus.Category.OVERDUE,
+                    RequestStatus.Category.CANCELLED
+            };
+            case ALL_REQUESTS -> new RequestStatus.Category[] {
+                    RequestStatus.Category.ALL, RequestStatus.Category.PENDING,
+                    RequestStatus.Category.APPROVED, RequestStatus.Category.PARTIALLY_RELEASED,
+                    RequestStatus.Category.COMPLETED, RequestStatus.Category.DECLINED,
+                    RequestStatus.Category.OVERDUE, RequestStatus.Category.NEEDS_ACTION,
+                    RequestStatus.Category.CANCELLED, RequestStatus.Category.ADMIN_REVIEW,
+                    RequestStatus.Category.DIRECTOR_REVIEW, RequestStatus.Category.FINAL_APPROVED
+            };
+        };
+    }
+
+    private static boolean statusCategoriesContains(Mode mode, RequestStatus.Category category) {
+        for (RequestStatus.Category candidate : statusCategoriesFor(mode)) {
+            if (candidate == category) return true;
+        }
+        return false;
     }
 
     private String titleForMode() {
@@ -686,7 +945,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
             case SCHEDULE_ASSIGNMENT:
                 return "Release your department's approved equipment and inspect returns, independently of other departments.";
             case TRANSACTION_HISTORY:
-                return "Returned, declined, and closed requests for your department.";
+                return "Pending, approved, declined, overdue, and completed request records.";
             case ALL_REQUESTS:
             default:
                 return scopeRole == null
@@ -705,7 +964,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
             case SCHEDULE_ASSIGNMENT:
                 return "Nothing to release or receive. Requests appear here after final approval.";
             case TRANSACTION_HISTORY:
-                return "Completed transactions will appear here.";
+                return "No transaction records match the current filters.";
             case ALL_REQUESTS:
             default:
                 return "No request records have been submitted yet.";

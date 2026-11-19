@@ -96,13 +96,18 @@ public class NotificationDetailsDialog extends JDialog {
         if (delete != null) {
             PrimaryButton remove = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
             remove.addActionListener(event -> {
-                int answer = JOptionPane.showConfirmDialog(this,
+                if (!UiSupport.beginAction(remove)) {
+                    return;
+                }
+                int answer = UiSupport.showConfirmDialog(this,
                         "Delete this notification? The related request is not affected.",
                         "Delete notification", JOptionPane.YES_NO_OPTION,
                         JOptionPane.WARNING_MESSAGE);
                 if (answer == JOptionPane.YES_OPTION) {
                     dispose();
                     delete.run();
+                } else {
+                    UiSupport.endAction(remove);
                 }
             });
             actions.add(remove);

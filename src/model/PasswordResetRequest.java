@@ -12,6 +12,8 @@ public class PasswordResetRequest {
     private final String role;
     private final String department;
     private final LocalDateTime requestedAt;
+    private final boolean registeredEmailMatch;
+    private final boolean identityVerified;
 
     public PasswordResetRequest(
             long requestId,
@@ -22,6 +24,21 @@ public class PasswordResetRequest {
             String role,
             String department,
             LocalDateTime requestedAt) {
+        this(requestId, userId, username, fullName, email, role, department,
+                requestedAt, true, true);
+    }
+
+    public PasswordResetRequest(
+            long requestId,
+            long userId,
+            String username,
+            String fullName,
+            String email,
+            String role,
+            String department,
+            LocalDateTime requestedAt,
+            boolean registeredEmailMatch,
+            boolean identityVerified) {
         this.requestId = requestId;
         this.userId = userId;
         this.username = username;
@@ -30,6 +47,8 @@ public class PasswordResetRequest {
         this.role = role;
         this.department = department;
         this.requestedAt = requestedAt;
+        this.registeredEmailMatch = registeredEmailMatch;
+        this.identityVerified = identityVerified;
     }
 
     public long getRequestId() { return requestId; }
@@ -40,4 +59,6 @@ public class PasswordResetRequest {
     public String getRole() { return role; }
     public String getDepartment() { return department; }
     public LocalDateTime getRequestedAt() { return requestedAt; }
+    public boolean isRegisteredEmailMatch() { return registeredEmailMatch; }
+    public boolean isIdentityVerified() { return identityVerified; }
 }

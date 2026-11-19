@@ -23,7 +23,9 @@ public class Notification {
             "equipment ready for release",
             "upcoming equipment release",
             "equipment release reminder",
-            "not released on time");
+            "not released on time",
+            "ready for return inspection",
+            "awaiting inspection");
 
     private final long notificationId;
     private final long userId;

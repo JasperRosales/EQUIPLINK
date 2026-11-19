@@ -8,6 +8,7 @@ import src.model.EquipmentRequestItem;
 import src.model.ItemInspection;
 import src.model.RequestOccurrence;
 import src.model.RequestStatus;
+import src.util.UndoPolicy;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -16,9 +17,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Time;
+import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -34,6 +37,7 @@ public class BorrowRequestService {
     private static final String[] EDITABLE_STATUSES = {
             "PENDING_STAFF", "NEEDS_ACTION"
     };
+    private static final ZoneId MANILA = ZoneId.of("Asia/Manila");
 
     public List<BorrowRequest> findActiveRequests(long borrowerId) throws SQLException {
         return findRequests(
@@ -153,43 +157,164 @@ public class BorrowRequestService {
         }
     }
 
+    /**
+     * Soft-deletes one of the borrower's requests. Every status is deletable, including
+     * completed requests. The request's original status is left untouched so Undo can
+     * put it back exactly where it was instead of turning it into a cancellation.
+     */
     public void deleteRequest(long borrowerId, long requestId) throws Exception {
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                String previousStatus = lockEditableRequest(connection, borrowerId, requestId);
-                ensureGroupsArePending(connection, requestId);
-
-                String updateSql = """
-                        UPDATE borrow_requests
-                        SET status = 'CANCELLED',
-                            cancelled_by = ?,
-                            cancelled_at = CURRENT_TIMESTAMP,
-                            cancellation_reason = 'Cancelled by borrower',
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE request_id = ? AND borrower_id = ?
-                        """;
-                try (PreparedStatement statement = connection.prepareStatement(updateSql)) {
-                    statement.setLong(1, borrowerId);
-                    statement.setLong(2, requestId);
-                    statement.setLong(3, borrowerId);
-                    if (statement.executeUpdate() != 1) {
-                        throw new IllegalStateException("The request could not be cancelled.");
-                    }
-                }
+                String previousStatus = lockOwnRequestForDeletion(connection, borrowerId, requestId);
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        UPDATE request_groups
-                        SET status = 'CANCELLED', cancelled_by = ?,
-                            cancelled_at = CURRENT_TIMESTAMP
-                        WHERE request_id = ? AND status = 'PENDING'
+                        UPDATE borrow_requests
+                        SET deleted_at = CURRENT_TIMESTAMP,
+                            deleted_by = ?,
+                            deletion_reason = ?,
+                            status_before_delete = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE request_id = ? AND borrower_id = ? AND deleted_at IS NULL
                         """)) {
                     statement.setLong(1, borrowerId);
-                    statement.setLong(2, requestId);
-                    statement.executeUpdate();
+                    statement.setString(2, "Deleted by borrower");
+                    statement.setString(3, previousStatus);
+                    statement.setLong(4, requestId);
+                    statement.setLong(5, borrowerId);
+                    if (statement.executeUpdate() != 1) {
+                        throw new IllegalStateException("The request could not be deleted.");
+                    }
                 }
                 recordHistory(connection, requestId, null, borrowerId,
-                        "BORROWER_CANCELLED", previousStatus, "CANCELLED",
-                        "Cancelled by borrower.");
+                        "BORROWER_DELETED", previousStatus, previousStatus,
+                        "Deleted by borrower; recoverable within "
+                                + UndoPolicy.RECOVERY_LABEL + ".");
+                connection.commit();
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            }
+        }
+    }
+
+    /** Restores a request deleted by its borrower, with its original status intact. */
+    public void restoreRequest(long borrowerId, long requestId) throws Exception {
+        restoreDeletedRequest(borrowerId, borrowerId, requestId, true, "BORROWER_RESTORED");
+    }
+
+    /**
+     * ICT System Admin deletion is a recoverable soft delete: the row keeps its
+     * original status and stays out of every list until it is restored or expires.
+     */
+    public void deleteRequestAsAdmin(
+            String actorRole, long actorId, long requestId, String reason) throws Exception {
+        requireIctRole(actorRole);
+        String auditReason = reason == null || reason.isBlank()
+                ? "Deleted by ICT System Admin" : reason.trim();
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                String previousStatus = lockRequestStatus(connection, requestId);
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE borrow_requests
+                        SET deleted_at = CURRENT_TIMESTAMP,
+                            deleted_by = ?,
+                            deletion_reason = ?,
+                            status_before_delete = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE request_id = ? AND deleted_at IS NULL
+                        """)) {
+                    statement.setLong(1, actorId);
+                    statement.setString(2, auditReason);
+                    statement.setString(3, previousStatus);
+                    statement.setLong(4, requestId);
+                    if (statement.executeUpdate() != 1) {
+                        throw new IllegalStateException("The request could not be deleted.");
+                    }
+                }
+                recordHistory(connection, requestId, null, actorId,
+                        "ADMIN_DELETED", previousStatus, previousStatus, auditReason);
+                notifyBorrower(connection, requestId, "Request deleted",
+                        "The ICT System Admin deleted this request. Reason: " + auditReason,
+                        null, "ADMIN_DELETED");
+                connection.commit();
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            }
+        }
+    }
+
+    /** Restores a request deleted by the ICT System Admin, with its original status intact. */
+    public void restoreRequestAsAdmin(
+            String actorRole, long actorId, long requestId) throws Exception {
+        requireIctRole(actorRole);
+        restoreDeletedRequest(null, actorId, requestId, false, "ADMIN_RESTORED");
+    }
+
+    private static void requireIctRole(String actorRole) {
+        if (!"ICT_STAFF".equalsIgnoreCase(actorRole == null ? "" : actorRole.trim())) {
+            throw new SecurityException("Only the ICT System Admin can delete requests.");
+        }
+    }
+
+    /**
+     * Shared restore path. Only rows deleted inside the recovery window are brought
+     * back; the status column is never rewritten, so approvals and completions survive.
+     */
+    private void restoreDeletedRequest(
+            Long borrowerId, long actorId, long requestId,
+            boolean mustOwn, String event) throws Exception {
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                String status;
+                String previousStatus;
+                Timestamp deletedAt;
+                String selectSql = "SELECT status, status_before_delete, deleted_at "
+                        + "FROM borrow_requests WHERE request_id = ?"
+                        + (mustOwn ? " AND borrower_id = ?" : "") + " FOR UPDATE";
+                try (PreparedStatement statement = connection.prepareStatement(selectSql)) {
+                    statement.setLong(1, requestId);
+                    if (mustOwn) {
+                        statement.setLong(2, borrowerId == null ? 0L : borrowerId);
+                    }
+                    try (ResultSet result = statement.executeQuery()) {
+                        if (!result.next()) {
+                            throw new IllegalArgumentException("Request was not found.");
+                        }
+                        status = result.getString("status");
+                        previousStatus = result.getString("status_before_delete");
+                        deletedAt = result.getTimestamp("deleted_at");
+                    }
+                }
+                if (deletedAt == null) {
+                    throw new IllegalArgumentException("This request is not deleted.");
+                }
+                LocalDateTime earliest = LocalDateTime.now(MANILA)
+                        .minusMinutes(UndoPolicy.RECOVERY_MINUTES);
+                if (deletedAt.toLocalDateTime().isBefore(earliest)) {
+                    throw new IllegalArgumentException(
+                            "The " + UndoPolicy.RECOVERY_LABEL + " recovery period has ended.");
+                }
+
+                String updateSql = "UPDATE borrow_requests "
+                        + "SET deleted_at = NULL, deleted_by = NULL, deletion_reason = NULL, "
+                        + "status_before_delete = NULL, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE request_id = ? AND deleted_at IS NOT NULL"
+                        + (mustOwn ? " AND borrower_id = ?" : "");
+                try (PreparedStatement statement = connection.prepareStatement(updateSql)) {
+                    statement.setLong(1, requestId);
+                    if (mustOwn) {
+                        statement.setLong(2, borrowerId == null ? 0L : borrowerId);
+                    }
+                    if (statement.executeUpdate() != 1) {
+                        throw new IllegalStateException("The request could not be restored.");
+                    }
+                }
+                recordHistory(connection, requestId, null, actorId, event,
+                        previousStatus == null ? status : previousStatus, status,
+                        "Restored within the " + UndoPolicy.RECOVERY_LABEL + " recovery window.");
                 connection.commit();
             } catch (Exception exception) {
                 connection.rollback();
@@ -223,18 +348,23 @@ public class BorrowRequestService {
                     SELECT COUNT(DISTINCT br.request_id)
                     FROM borrow_requests br
                     JOIN request_groups rg ON rg.request_id = br.request_id
-                    WHERE br.status = 'PENDING_STAFF'
+                    WHERE br.deleted_at IS NULL
+                      AND br.status = 'PENDING_STAFF'
                       AND rg.custodian_role = ?
                       AND rg.status = 'PENDING'
                     """;
         } else if ("ADMIN".equals(normalizedRole)) {
-            sql = "SELECT COUNT(*) FROM borrow_requests WHERE status = 'PENDING_ADMIN'";
+            sql = "SELECT COUNT(*) FROM borrow_requests "
+                    + "WHERE deleted_at IS NULL AND status = 'PENDING_ADMIN'";
         } else if ("DIRECTOR".equals(normalizedRole)) {
-            sql = "SELECT COUNT(*) FROM borrow_requests WHERE status = 'PENDING_DIRECTOR'";
+            sql = "SELECT COUNT(*) FROM borrow_requests "
+                    + "WHERE deleted_at IS NULL AND status = 'PENDING_DIRECTOR'";
         } else {
             sql = """
                     SELECT COUNT(*) FROM borrow_requests
-                    WHERE status IN ('PENDING_STAFF', 'NEEDS_ACTION', 'PENDING_ADMIN', 'PENDING_DIRECTOR')
+                    WHERE deleted_at IS NULL
+                      AND status IN ('PENDING_STAFF', 'NEEDS_ACTION',
+                                     'PENDING_ADMIN', 'PENDING_DIRECTOR')
                     """;
         }
 
@@ -261,7 +391,8 @@ public class BorrowRequestService {
         }
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement(
-                        "SELECT COUNT(*) FROM borrow_requests WHERE status = ?")) {
+                        "SELECT COUNT(*) FROM borrow_requests "
+                                + "WHERE deleted_at IS NULL AND status = ?")) {
             statement.setString(1, status);
             try (ResultSet result = statement.executeQuery()) {
                 result.next();
@@ -369,32 +500,86 @@ public class BorrowRequestService {
                       AND rg.custodian_role = ?
                       AND (
                           (rg.status = 'ASSIGNED' AND br.status IN ('APPROVED', 'RELEASED'))
-                          OR rg.status = 'RELEASED'
+                          OR rg.status IN ('RELEASED', 'RECEIVED')
                       )
                 )
                 """, normalizedRole));
     }
 
     /**
-     * Finished work for the role: returned equipment, equipment the department
-     * declined, and approved equipment on requests later rejected or cancelled.
+     * Transaction history for the role: every request containing this department's
+     * equipment, in any status. Pending, approved, declined, overdue, released,
+     * received, and completed records all live here; nothing is archived or deleted.
      */
     public List<BorrowRequest> findHistoryForRole(String role) throws SQLException {
-        String normalizedRole = requireCustodianRole(role);
-        return findRequests("""
-                EXISTS (
-                    SELECT 1
-                    FROM request_groups rg
-                    WHERE rg.request_id = br.request_id
-                      AND rg.custodian_role = ?
-                      AND (
-                          rg.status IN ('RETURNED', 'DECLINED')
-                          OR (br.status IN ('REJECTED', 'CANCELLED')
-                              AND rg.assigned_by IS NOT NULL)
-                      )
-                )
-                """, normalizedRole);
+        return findAllRequests(requireCustodianRole(role));
     }
+    /**
+     * Requests with activity on the given Manila day. Dashboard counters use this so
+     * a new day starts with fresh counts; the underlying request and audit records
+     * are never removed. History events cover submissions, decisions, reviews,
+     * releases, receipt, and returns; overdue notices cover overdue counters.
+     */
+    public List<BorrowRequest> findDailyActivity(
+            String role, long userId, LocalDate day) throws SQLException {
+        if (day == null) return List.of();
+        String normalizedRole = role == null ? "" : role.trim().toUpperCase();
+        List<BorrowRequest> visible;
+        if ("BORROWER".equals(normalizedRole)) {
+            visible = findAllForBorrower(userId);
+        } else if ("ICT_STAFF".equals(normalizedRole)
+                || "FACILITY_STAFF".equals(normalizedRole)
+                || "ADMIN".equals(normalizedRole)
+                || "DIRECTOR".equals(normalizedRole)) {
+            visible = findAllRequests(normalizedRole);
+        } else {
+            return List.of();
+        }
+        if (visible.isEmpty()) return visible;
+
+        LocalDate effectiveDay = day == null ? LocalDate.now(MANILA) : day;
+        Set<Long> activeIds = new HashSet<>();
+        try (Connection connection = Database.getConnection()) {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT DISTINCT request_id FROM request_history
+                    WHERE request_id IS NOT NULL AND CAST(created_at AS DATE) = ?
+                    """)) {
+                statement.setDate(1, Date.valueOf(effectiveDay));
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        activeIds.add(result.getLong("request_id"));
+                    }
+                }
+            }
+            boolean scopedDepartment = "ICT_STAFF".equals(normalizedRole)
+                    || "FACILITY_STAFF".equals(normalizedRole);
+            String department = scopedDepartment ? normalizedRole : null;
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT DISTINCT request_id FROM notifications
+                    WHERE request_id IS NOT NULL
+                      AND CAST(created_at AS DATE) = ?
+                      AND action IN ('OVERDUE', 'RETURN_INSPECTION')
+                      AND (? IS NULL OR department = ?)
+                    """)) {
+                statement.setDate(1, Date.valueOf(effectiveDay));
+                statement.setObject(2, department, Types.VARCHAR);
+                statement.setObject(3, department, Types.VARCHAR);
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        activeIds.add(result.getLong("request_id"));
+                    }
+                }
+            }
+        }
+        List<BorrowRequest> daily = new ArrayList<>();
+        for (BorrowRequest request : visible) {
+            if (activeIds.contains(request.getRequestId())) {
+                daily.add(request);
+            }
+        }
+        return daily;
+    }
+
     public void assignStaffRequest(String role, long actorId, long requestId)
             throws Exception {
         assignStaffRequest(role, actorId, requestId, null);
@@ -415,7 +600,7 @@ public class BorrowRequestService {
             try {
                 String previousStatus = lockRequestStatus(connection, requestId);
                 requireStaffReview(previousStatus);
-                List<GroupRow> pending = pendingGroups(
+                List<GroupRow> pending = processablePendingGroups(
                         lockRoleGroups(connection, requestId, normalizedRole));
 
                 Map<Long, ItemInspection> inputs = indexInspections(assignments);
@@ -474,11 +659,13 @@ public class BorrowRequestService {
                         SET status = 'ASSIGNED', assigned_by = ?,
                             assigned_at = CURRENT_TIMESTAMP, staff_remarks = NULL,
                             declined_by = NULL, declined_at = NULL, overdue_notified = FALSE
-                        WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
-                        """)) {
+                        WHERE group_id IN (%s) AND status = 'PENDING'
+                        """.formatted(placeholders(pending.size())))) {
                     statement.setLong(1, actorId);
-                    statement.setLong(2, requestId);
-                    statement.setString(3, normalizedRole);
+                    int parameter = 2;
+                    for (GroupRow group : pending) {
+                        statement.setLong(parameter++, group.groupId);
+                    }
                     if (statement.executeUpdate() != pending.size()) {
                         throw new IllegalStateException("Equipment assignment did not complete.");
                     }
@@ -529,31 +716,32 @@ public class BorrowRequestService {
             try {
                 String previousStatus = lockRequestStatus(connection, requestId);
                 requireStaffReview(previousStatus);
-                List<GroupRow> pending = pendingGroups(
+                List<GroupRow> pending = processablePendingGroups(
                         lockRoleGroups(connection, requestId, normalizedRole));
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_items
                         SET assigned_equipment_id = NULL, assigned_quantity = 0,
                             inspection_result = 'DECLINED'
-                        WHERE group_id IN (
-                            SELECT group_id FROM request_groups
-                            WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
-                        )
-                        """)) {
-                    statement.setLong(1, requestId);
-                    statement.setString(2, normalizedRole);
+                        WHERE group_id IN (%s)
+                        """.formatted(placeholders(pending.size())))) {
+                    int parameter = 1;
+                    for (GroupRow group : pending) {
+                        statement.setLong(parameter++, group.groupId);
+                    }
                     statement.executeUpdate();
                 }
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_groups
                         SET status = 'DECLINED', declined_by = ?,
                             declined_at = CURRENT_TIMESTAMP, staff_remarks = ?
-                        WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
-                        """)) {
+                        WHERE group_id IN (%s) AND status = 'PENDING'
+                        """.formatted(placeholders(pending.size())))) {
                     statement.setLong(1, actorId);
                     statement.setString(2, reason);
-                    statement.setLong(3, requestId);
-                    statement.setString(4, normalizedRole);
+                    int parameter = 3;
+                    for (GroupRow group : pending) {
+                        statement.setLong(parameter++, group.groupId);
+                    }
                     statement.executeUpdate();
                 }
                 String nextStatus = advanceAfterDepartmentDecision(
@@ -596,7 +784,7 @@ public class BorrowRequestService {
             try {
                 String previousStatus = lockRequestStatus(connection, requestId);
                 requireStaffReview(previousStatus);
-                List<GroupRow> pending = pendingGroups(
+                List<GroupRow> pending = processablePendingGroups(
                         lockRoleGroups(connection, requestId, normalizedRole));
                 // Departments whose approval is reset by the borrower's edit are told so.
                 notifyGroupStaff(connection, requestId, "ASSIGNED",
@@ -604,14 +792,21 @@ public class BorrowRequestService {
                         RequestStatus.departmentLabel(normalizedRole)
                                 + " staff requested changes from the borrower. Review the request again after it is resubmitted.",
                         "NEEDS_ACTION");
+                String placeholders = String.join(", ",
+                        java.util.Collections.nCopies(pending.size(), "?"));
                 try (PreparedStatement statement = connection.prepareStatement("""
                         UPDATE request_groups
                         SET status = 'UNABLE', staff_remarks = ?
                         WHERE request_id = ? AND custodian_role = ? AND status = 'PENDING'
-                        """)) {
-                    statement.setString(1, remarks.trim());
-                    statement.setLong(2, requestId);
-                    statement.setString(3, normalizedRole);
+                          AND group_id IN (
+                        """ + placeholders + ")" )) {
+                    int parameter = 1;
+                    statement.setString(parameter++, remarks.trim());
+                    statement.setLong(parameter++, requestId);
+                    statement.setString(parameter++, normalizedRole);
+                    for (GroupRow group : pending) {
+                        statement.setLong(parameter++, group.groupId);
+                    }
                     statement.executeUpdate();
                 }
                 try (PreparedStatement statement = connection.prepareStatement("""
@@ -672,6 +867,47 @@ public class BorrowRequestService {
         updateStaffTransaction(role, actorId, requestId, false, inspections);
     }
 
+    public void receiveByBorrower(long borrowerId, long requestId) throws Exception {
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                String requestStatus = lockRequestStatusForBorrower(connection, borrowerId, requestId);
+                if (!"RELEASED".equals(requestStatus)) {
+                    throw new IllegalArgumentException("Equipment can only be received after it has been released.");
+                }
+                List<GroupRow> groups = lockBorrowerGroups(connection, requestId);
+                if (groups.isEmpty()) {
+                    throw new IllegalStateException("No equipment groups found for this request.");
+                }
+                boolean hasReleased = false;
+                for (GroupRow g : groups) {
+                    if ("RELEASED".equals(g.status)) hasReleased = true;
+                }
+                if (!hasReleased) {
+                    throw new IllegalArgumentException("No released equipment is waiting for your confirmation.");
+                }
+                // Mark all RELEASED groups as RECEIVED (per-department)
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "UPDATE request_groups SET status='RECEIVED', received_by=?, received_at=CURRENT_TIMESTAMP "
+                                + "WHERE request_id=? AND status='RELEASED'")) {
+                    ps.setLong(1, borrowerId);
+                    ps.setLong(2, requestId);
+                    ps.executeUpdate();
+                }
+                // Do not change overall request status here; staff still inspects/returns per department
+                recordHistory(connection, requestId, null, borrowerId, "BORROWER_RECEIVED", requestStatus, requestStatus, null);
+                notifyRole(connection, "ICT_STAFF", requestId, "Borrower confirmed receipt",
+                        "Borrower confirmed receiving released equipment for request " + requestId + ".", null, "BORROWER_RECEIVED");
+                notifyRole(connection, "FACILITY_STAFF", requestId, "Borrower confirmed receipt",
+                        "Borrower confirmed receiving released equipment for request " + requestId + ".", null, "BORROWER_RECEIVED");
+                connection.commit();
+            } catch (Exception e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
     /**
      * Releases or receives the actor's department equipment. Only the department's
      * own approval is checked, so ICT and Facility release independently: one
@@ -696,9 +932,11 @@ public class BorrowRequestService {
                 GroupRow target;
                 String issues = null;
                 if (release) {
-                    target = firstWithStatus(groups, "ASSIGNED");
+                    target = firstDueWithStatus(groups, "ASSIGNED");
                     if (target == null) {
-                        throw new IllegalArgumentException(releaseBlockedReason(groups));
+                        String future = futureScheduleReason(groups, "ASSIGNED");
+                        throw new IllegalArgumentException(
+                                future == null ? releaseBlockedReason(groups) : future);
                     }
                     if (!finalApproved) {
                         throw new IllegalArgumentException(stageBlockedReason(requestStatus));
@@ -717,10 +955,13 @@ public class BorrowRequestService {
                         }
                     }
                 } else {
-                    target = firstWithStatus(groups, "RELEASED");
+                    target = firstDueWithStatus(groups, "RECEIVED");
                     if (target == null || !finalApproved) {
+                        String future = futureScheduleReason(groups, "RECEIVED");
                         throw new IllegalArgumentException(
-                                "Only released equipment can be marked as returned.");
+                                future == null
+                                        ? "Borrower must confirm receipt (Receive) before you can inspect/record return."
+                                        : future);
                     }
                     issues = recordReturnInspection(
                             connection, requestId, target.groupId, inspections);
@@ -728,7 +969,7 @@ public class BorrowRequestService {
                             UPDATE request_groups
                             SET status = 'RETURNED', inspected_by = ?,
                                 inspected_at = CURRENT_TIMESTAMP
-                            WHERE group_id = ? AND status = 'RELEASED'
+                            WHERE group_id = ? AND status = 'RECEIVED'
                             """)) {
                         statement.setLong(1, actorId);
                         statement.setLong(2, target.groupId);
@@ -741,7 +982,7 @@ public class BorrowRequestService {
                 String nextStatus = requestStatus;
                 String remainingStatuses = release
                         ? "('PENDING', 'ASSIGNED')"
-                        : "('PENDING', 'ASSIGNED', 'RELEASED')";
+                        : "('PENDING', 'ASSIGNED', 'RELEASED', 'RECEIVED')";
                 try (PreparedStatement statement = connection.prepareStatement(
                         "SELECT NOT EXISTS (SELECT 1 FROM request_groups "
                                 + "WHERE request_id = ? AND status IN " + remainingStatuses + ")")) {
@@ -928,13 +1169,72 @@ public class BorrowRequestService {
     /** Locks the request row so concurrent department actions are serialized. */
     private String lockRequestStatus(Connection connection, long requestId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT status FROM borrow_requests WHERE request_id = ? FOR UPDATE")) {
+                "SELECT status FROM borrow_requests "
+                        + "WHERE request_id = ? AND deleted_at IS NULL FOR UPDATE")) {
             statement.setLong(1, requestId);
             try (ResultSet result = statement.executeQuery()) {
                 if (!result.next()) {
                     throw new IllegalArgumentException("Request was not found.");
                 }
                 return result.getString(1);
+            }
+        }
+    }
+
+    private String lockRequestStatusForBorrower(Connection connection, long borrowerId, long requestId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT status FROM borrow_requests WHERE request_id=? AND borrower_id=? AND deleted_at IS NULL FOR UPDATE")) {
+            statement.setLong(1, requestId);
+            statement.setLong(2, borrowerId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalArgumentException("Request was not found.");
+                }
+                return result.getString(1);
+            }
+        }
+    }
+
+    private List<GroupRow> lockBorrowerGroups(Connection connection, long requestId) throws SQLException {
+        List<GroupRow> groups = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT rg.group_id, rg.status, COALESCE(ro.event_date, br.event_date) AS event_date, "
+                        + "COALESCE(ro.start_time, br.start_time) AS start_time, COALESCE(ro.end_time, br.end_time) AS end_time "
+                        + "FROM request_groups rg JOIN borrow_requests br ON br.request_id=rg.request_id "
+                        + "LEFT JOIN request_occurrences ro ON ro.occurrence_id=rg.occurrence_id "
+                        + "WHERE rg.request_id=? ORDER BY 3,4,rg.group_id FOR UPDATE OF rg")) {
+            statement.setLong(1, requestId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    groups.add(new GroupRow(result.getLong("group_id"), result.getString("status"),
+                            result.getDate("event_date").toLocalDate(),
+                            result.getTime("start_time").toLocalTime(),
+                            result.getTime("end_time").toLocalTime()));
+                }
+            }
+        }
+        return groups;
+    }
+
+    /**
+     * Locks a borrower's own request for deletion. Unlike the edit lock, this accepts
+     * every status — completed requests are deletable too — but never a deleted row.
+     */
+    private String lockOwnRequestForDeletion(
+            Connection connection, long borrowerId, long requestId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT status
+                FROM borrow_requests
+                WHERE request_id = ? AND borrower_id = ? AND deleted_at IS NULL
+                FOR UPDATE
+                """)) {
+            statement.setLong(1, requestId);
+            statement.setLong(2, borrowerId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalArgumentException("Request was not found.");
+                }
+                return result.getString("status");
             }
         }
     }
@@ -1005,7 +1305,7 @@ public class BorrowRequestService {
         }
     }
 
-    private static List<GroupRow> pendingGroups(List<GroupRow> groups) {
+    private static List<GroupRow> processablePendingGroups(List<GroupRow> groups) {
         if (groups.isEmpty()) {
             throw new SecurityException(
                     "This request has no equipment assigned to your department.");
@@ -1023,13 +1323,30 @@ public class BorrowRequestService {
         return pending;
     }
 
-    private static GroupRow firstWithStatus(List<GroupRow> groups, String status) {
+    /** A group can only be handled once its own scheduled date has arrived (for release/return). */
+    private static boolean isScheduleDue(GroupRow group) {
+        return group.eventDate == null || !group.eventDate.isAfter(LocalDate.now(MANILA));
+    }
+
+    private static GroupRow firstDueWithStatus(List<GroupRow> groups, String status) {
         for (GroupRow group : groups) {
-            if (status.equals(group.status)) {
+            if (status.equals(group.status) && isScheduleDue(group)) {
                 return group;
             }
         }
         return null;
+    }
+
+    private static String futureScheduleReason(List<GroupRow> groups, String status) {
+        LocalDate next = null;
+        for (GroupRow group : groups) {
+            if (status.equals(group.status) && !isScheduleDue(group)
+                    && (next == null || (group.eventDate != null && group.eventDate.isBefore(next)))) {
+                next = group.eventDate;
+            }
+        }
+        return next == null ? null
+                : "The next schedule is on " + next + ". It cannot be processed until that date.";
     }
 
     private static String releaseBlockedReason(List<GroupRow> groups) {
@@ -1327,6 +1644,7 @@ public class BorrowRequestService {
                 SELECT user_id, ?, ?, ?, ?, ?
                 FROM users
                 WHERE role = ? AND active = TRUE
+                  AND COALESCE(notifications_enabled, TRUE) = TRUE
                 """)) {
             statement.setLong(1, requestId);
             statement.setString(2, title);
@@ -1347,6 +1665,7 @@ public class BorrowRequestService {
                 SELECT user_id, ?, ?, ?, ?, ?
                 FROM users
                 WHERE role = ? AND active = TRUE AND user_id <> ?
+                  AND COALESCE(notifications_enabled, TRUE) = TRUE
                 """)) {
             statement.setLong(1, requestId);
             statement.setString(2, title);
@@ -1375,6 +1694,7 @@ public class BorrowRequestService {
                 FROM request_groups rg
                 JOIN users u ON u.role = rg.custodian_role AND u.active = TRUE
                 WHERE rg.request_id = ? AND rg.status = ?
+                  AND COALESCE(u.notifications_enabled, TRUE) = TRUE
                 """)) {
             statement.setString(1, title);
             statement.setString(2, message);
@@ -1396,9 +1716,11 @@ public class BorrowRequestService {
             String department, String action) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO notifications (user_id, request_id, title, message, department, action)
-                SELECT borrower_id, request_id, ?, ?, ?, ?
-                FROM borrow_requests
-                WHERE request_id = ?
+                SELECT br.borrower_id, br.request_id, ?, ?, ?, ?
+                FROM borrow_requests br
+                JOIN users u ON u.user_id = br.borrower_id
+                WHERE br.request_id = ?
+                  AND COALESCE(u.notifications_enabled, TRUE) = TRUE
                 """)) {
             statement.setString(1, title);
             statement.setString(2, message);
@@ -1420,7 +1742,7 @@ public class BorrowRequestService {
 
     private int countRequests(long borrowerId, String statuses) throws SQLException {
         String sql = "SELECT COUNT(*) FROM borrow_requests "
-                + "WHERE borrower_id = ? AND status IN " + statuses;
+                + "WHERE deleted_at IS NULL AND borrower_id = ? AND status IN " + statuses;
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, borrowerId);
@@ -1438,7 +1760,7 @@ public class BorrowRequestService {
                        u.full_name AS borrower_name, u.borrower_type, br.venue, br.event_date,
                        br.start_time, br.end_time, br.purpose, br.participants,
                        br.person_in_charge, br.position, br.status, br.remarks,
-                       br.submitted_at,
+                       br.admin_status, br.director_status, br.submitted_at,
                        e.equipment_id, e.equipment_code, e.equipment_name, e.category,
                        rg.custodian_role, rg.status AS group_status,
                        ri.requested_quantity, ri.assigned_quantity,
@@ -1450,7 +1772,7 @@ public class BorrowRequestService {
                 LEFT JOIN request_items ri ON ri.request_id = br.request_id
                 LEFT JOIN request_groups rg ON rg.group_id = ri.group_id
                 LEFT JOIN equipment e ON e.equipment_id = ri.requested_equipment_id
-                WHERE %s
+                WHERE br.deleted_at IS NULL AND (%s)
                 ORDER BY br.submitted_at DESC, br.request_id DESC, e.equipment_name,
                          ri.request_item_id
                 """.formatted(predicate);
@@ -1546,6 +1868,7 @@ public class BorrowRequestService {
                        CASE WHEN rg.status = 'DECLINED' THEN ud.full_name
                             ELSE ua.full_name END AS decided_by,
                        ur.full_name AS released_by, rg.released_at,
+                       urcv.full_name AS received_by, rg.received_at,
                        ui.full_name AS inspected_by, rg.inspected_at
                 FROM request_groups rg
                 JOIN borrow_requests br ON br.request_id = rg.request_id
@@ -1553,6 +1876,7 @@ public class BorrowRequestService {
                 LEFT JOIN users ua ON ua.user_id = rg.assigned_by
                 LEFT JOIN users ud ON ud.user_id = rg.declined_by
                 LEFT JOIN users ur ON ur.user_id = rg.released_by
+                LEFT JOIN users urcv ON urcv.user_id = rg.received_by
                 LEFT JOIN users ui ON ui.user_id = rg.inspected_by
                 WHERE rg.request_id IN (%s)
                 ORDER BY rg.custodian_role, 7, 8, rg.group_id
@@ -1579,6 +1903,8 @@ public class BorrowRequestService {
                             toDateTime(rs.getTimestamp("decided_at")),
                             rs.getString("released_by"),
                             toDateTime(rs.getTimestamp("released_at")),
+                            rs.getString("received_by"),
+                            toDateTime(rs.getTimestamp("received_at")),
                             rs.getString("inspected_by"),
                             toDateTime(rs.getTimestamp("inspected_at"))));
                 }
@@ -1857,7 +2183,7 @@ public class BorrowRequestService {
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT status
                 FROM borrow_requests
-                WHERE request_id = ? AND borrower_id = ?
+                WHERE request_id = ? AND borrower_id = ? AND deleted_at IS NULL
                 FOR UPDATE
                 """)) {
             statement.setLong(1, requestId);
@@ -1956,6 +2282,8 @@ public class BorrowRequestService {
         private final String position;
         private final String status;
         private final String remarks;
+        private final String adminStatus;
+        private final String directorStatus;
         private final LocalDateTime submittedAt;
         /** One line per equipment; multi-schedule copies are merged to avoid duplicates. */
         private final Map<Long, EquipmentRequestItem> items = new LinkedHashMap<>();
@@ -1979,6 +2307,8 @@ public class BorrowRequestService {
             position = result.getString("position");
             status = result.getString("status");
             remarks = result.getString("remarks");
+            adminStatus = result.getString("admin_status");
+            directorStatus = result.getString("director_status");
             submittedAt = result.getTimestamp("submitted_at").toLocalDateTime();
         }
 
@@ -2033,6 +2363,8 @@ public class BorrowRequestService {
                     personInCharge, position, status, remarks, submittedAt,
                     requestItems, occurrences);
             request.setBorrowerType(borrowerType);
+            request.setAdminStatus(adminStatus);
+            request.setDirectorStatus(directorStatus);
             request.setDepartments(departments);
             return request;
         }

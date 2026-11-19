@@ -3,6 +3,7 @@ package src.service;
 import src.database.Database;
 import src.model.Notification;
 import src.model.RequestStatus;
+import src.util.UndoPolicy;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -10,6 +11,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
@@ -125,7 +127,10 @@ public class NotificationService {
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement("""
                         UPDATE notifications
-                        SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, is_read = TRUE
+                        SET read_before_delete = is_read,
+                            is_deleted = TRUE,
+                            deleted_at = CURRENT_TIMESTAMP,
+                            is_read = TRUE
                         WHERE notification_id = ? AND user_id = ? AND is_deleted = FALSE
                         """)) {
             statement.setLong(1, notificationId);
@@ -141,12 +146,77 @@ public class NotificationService {
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement("""
                         UPDATE notifications
-                        SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, is_read = TRUE
+                        SET read_before_delete = is_read,
+                            is_deleted = TRUE,
+                            deleted_at = CURRENT_TIMESTAMP,
+                            is_read = TRUE
                         WHERE user_id = ? AND is_deleted = FALSE
                         """)) {
             statement.setLong(1, userId);
             return statement.executeUpdate();
         }
+    }
+
+    /**
+     * Brings one deleted notification back to the user's list. Restore is only allowed
+     * while the shared undo window is open; the original read/unread state is restored.
+     */
+    public void restore(long userId, long notificationId) throws SQLException {
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE notifications
+                        SET is_deleted = FALSE,
+                            deleted_at = NULL,
+                            is_read = COALESCE(read_before_delete, FALSE),
+                            read_before_delete = NULL
+                        WHERE notification_id = ? AND user_id = ? AND is_deleted = TRUE
+                          AND deleted_at >= CURRENT_TIMESTAMP - """
+                        + UndoPolicy.RECOVERY_SQL + """
+                         """)) {
+            statement.setLong(1, notificationId);
+            statement.setLong(2, userId);
+            if (statement.executeUpdate() != 1) {
+                throw new IllegalArgumentException(
+                        "The " + UndoPolicy.RECOVERY_LABEL
+                                + " recovery period has ended or the notification no longer exists.");
+            }
+        }
+    }
+
+    /** Restores several notifications deleted together (Undo for "Delete all"). */
+    public int restoreAll(long userId, java.util.Collection<Long> notificationIds)
+            throws SQLException {
+        if (notificationIds == null || notificationIds.isEmpty()) {
+            return 0;
+        }
+        StringBuilder sql = new StringBuilder("""
+                UPDATE notifications
+                SET is_deleted = FALSE,
+                    deleted_at = NULL,
+                    is_read = COALESCE(read_before_delete, FALSE),
+                    read_before_delete = NULL
+                WHERE user_id = ? AND is_deleted = TRUE
+                  AND deleted_at >= CURRENT_TIMESTAMP - """
+                + UndoPolicy.RECOVERY_SQL + " AND notification_id IN (");
+        for (int i = 0; i < notificationIds.size(); i++) {
+            sql.append(i == 0 ? "?" : ", ?");
+        }
+        sql.append(')');
+        int restored = 0;
+        try (Connection connection = Database.getConnection();
+                PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            statement.setLong(1, userId);
+            int index = 2;
+            for (Long id : notificationIds) {
+                statement.setLong(index++, id == null ? 0L : id);
+            }
+            restored = statement.executeUpdate();
+        }
+        if (restored == 0) {
+            throw new IllegalArgumentException(
+                    "The " + UndoPolicy.RECOVERY_LABEL + " recovery period has ended.");
+        }
+        return restored;
     }
 
     /**
@@ -163,14 +233,18 @@ public class NotificationService {
                                (SELECT COALESCE(MAX(notification_id), 0) FROM notifications
                                  WHERE user_id = ?),
                                (SELECT COUNT(*) FROM notifications
-                                 WHERE user_id = ? AND is_deleted = FALSE AND is_read = FALSE)
+                                 WHERE user_id = ? AND is_deleted = FALSE AND is_read = FALSE),
+                               (SELECT COUNT(*) FROM notifications
+                                 WHERE user_id = ? AND is_deleted = TRUE)
                         """)) {
             statement.setLong(1, userId);
             statement.setLong(2, userId);
+            statement.setLong(3, userId);
             try (ResultSet result = statement.executeQuery()) {
                 result.next();
                 return result.getLong(1) + "|" + result.getTimestamp(2) + "|"
-                        + result.getLong(3) + "|" + result.getLong(4) + "|" + result.getLong(5);
+                        + result.getLong(3) + "|" + result.getLong(4) + "|"
+                        + result.getLong(5) + "|" + result.getLong(6);
             }
         }
     }
@@ -181,7 +255,8 @@ public class NotificationService {
      * is claimed with an atomic UPDATE ... RETURNING.
      */
     public void runOverdueSweep() throws SQLException {
-        Timestamp now = Timestamp.valueOf(LocalDateTime.now());
+        Timestamp now = Timestamp.valueOf(
+                LocalDateTime.now(ZoneId.of("Asia/Manila")));
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
@@ -305,6 +380,47 @@ public class NotificationService {
                                 role, "OVERDUE");
                     }
                 }
+
+                // 4. Released equipment needs inspection once the usage period ends.
+                Map<Long, Set<String>> awaitingInspection = new HashMap<>();
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE request_groups rg
+                        SET return_notified = TRUE
+                        WHERE rg.status = 'RELEASED' AND rg.return_notified = FALSE
+                          AND (
+                              SELECT COALESCE(ro.event_date, br.event_date)
+                                     + COALESCE(ro.end_time, br.end_time)
+                              FROM borrow_requests br
+                              LEFT JOIN request_occurrences ro
+                                     ON ro.occurrence_id = rg.occurrence_id
+                              WHERE br.request_id = rg.request_id
+                          ) < ?
+                        RETURNING rg.request_id, rg.custodian_role
+                        """)) {
+                    statement.setTimestamp(1, now);
+                    try (ResultSet result = statement.executeQuery()) {
+                        while (result.next()) {
+                            awaitingInspection.computeIfAbsent(
+                                    result.getLong(1), k -> new HashSet<>())
+                                    .add(result.getString(2));
+                        }
+                    }
+                }
+                for (Map.Entry<Long, Set<String>> entry : awaitingInspection.entrySet()) {
+                    for (String role : entry.getValue()) {
+                        String department = RequestStatus.departmentLabel(role);
+                        notifyUsers(connection, "role = ?", role, entry.getKey(),
+                                "Equipment ready for return inspection",
+                                "The borrowing period ended. Inspect the returned "
+                                        + department + " equipment and record its condition.",
+                                role, "RETURN_INSPECTION");
+                        notifyUsers(connection, "role = ?", "ADMIN", entry.getKey(),
+                                department + " equipment awaiting inspection",
+                                "The borrowing period ended and " + department
+                                        + " staff need to inspect the returned equipment.",
+                                role, "RETURN_INSPECTION");
+                    }
+                }
                 connection.commit();
             } catch (SQLException exception) {
                 connection.rollback();
@@ -318,7 +434,8 @@ public class NotificationService {
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO notifications (user_id, request_id, title, message, department, action) "
-                        + "SELECT user_id, ?, ?, ?, ?, ? FROM users WHERE active = TRUE AND "
+                        + "SELECT user_id, ?, ?, ?, ?, ? FROM users WHERE active = TRUE "
+                        + "AND COALESCE(notifications_enabled, TRUE) = TRUE AND "
                         + predicate)) {
             statement.setLong(1, requestId);
             statement.setString(2, title);
@@ -334,8 +451,11 @@ public class NotificationService {
             String message, String department) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO notifications (user_id, request_id, title, message, department, action)
-                SELECT borrower_id, request_id, ?, ?, ?, 'OVERDUE'
-                FROM borrow_requests WHERE request_id = ?
+                SELECT br.borrower_id, br.request_id, ?, ?, ?, 'OVERDUE'
+                FROM borrow_requests br
+                JOIN users u ON u.user_id = br.borrower_id
+                WHERE br.request_id = ?
+                  AND COALESCE(u.notifications_enabled, TRUE) = TRUE
                 """)) {
             statement.setString(1, title);
             statement.setString(2, message);
@@ -372,10 +492,15 @@ public class NotificationService {
         try (Connection connection = Database.getConnection();
                 PreparedStatement statement = connection.prepareStatement("""
                         INSERT INTO notifications (user_id, title, message)
-                        VALUES (?, 'Pending request reminder', ?)
+                        SELECT ?, 'Pending request reminder', ?
+                        WHERE EXISTS (
+                            SELECT 1 FROM users
+                            WHERE user_id = ? AND COALESCE(notifications_enabled, TRUE) = TRUE
+                        )
                         """)) {
             statement.setLong(1, userId);
             statement.setString(2, message);
+            statement.setLong(3, userId);
             statement.executeUpdate();
         }
     }
@@ -390,6 +515,7 @@ public class NotificationService {
                 JOIN users u ON u.user_id = br.borrower_id
                 WHERE br.borrower_id = ?
                   AND u.borrower_type = 'FACULTY'
+                  AND COALESCE(u.notifications_enabled, TRUE) = TRUE
                   AND br.status IN ('APPROVED', 'RELEASED')
                   AND COALESCE(ro.release_notified, FALSE) = FALSE
                   AND (ro.event_date::timestamp + ro.start_time)

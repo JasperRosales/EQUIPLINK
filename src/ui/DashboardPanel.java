@@ -99,7 +99,8 @@ public class DashboardPanel extends JPanel implements Refreshable {
     }
 
     private void addStatCards() {
-        String all = isBorrower() ? "My Requests::" : "All Requests::";
+        String all = isBorrower() ? "My Requests::"
+                : isStaff() || isDirector() ? "Transaction History::" : "All Requests::";
         if (isStaff()) {
             statCards[0] = new DashboardCard("Total equipment", "—",
                     "In your inventory", AppTheme.primary());
@@ -116,7 +117,7 @@ public class DashboardPanel extends JPanel implements Refreshable {
             addCardRow(0, 4);
             add(Box.createVerticalStrut(14));
             String department = RequestStatus.departmentLabel(user.getRole());
-            statCards[4] = new DashboardCard("Awaiting decision", "—",
+            statCards[4] = new DashboardCard("Awaiting Decision", "—",
                     department + " equipment pending", ORANGE);
             statCards[5] = new DashboardCard("Approved", "—",
                     "Approved by " + department, GREEN);
@@ -230,14 +231,15 @@ public class DashboardPanel extends JPanel implements Refreshable {
         shortcuts.add(Box.createVerticalStrut(9));
         addShortcut(shortcuts,
                 isBorrower() ? "Borrowing history"
-                        : isDirector() ? "All requests"
+                        : isDirector() ? "Transaction history"
                                 : isStaff() ? "Schedule & assignment" : "All requests",
                 isBorrower() ? "See your completed and past requests."
-                        : isDirector() ? "Search the complete request history."
+                        : isDirector() ? "Search the complete transaction history."
                                 : isStaff() ? "Release and track approved equipment."
                                         : "Search all request records.",
                 isBorrower() ? "Borrowing Request"
-                        : isStaff() ? "Schedule & Assignment" : "All Requests");
+                        : isDirector() ? "Transaction History"
+                                : isStaff() ? "Schedule & Assignment" : "All Requests");
         bottom.add(recent);
         bottom.add(shortcuts);
         add(bottom);
@@ -266,14 +268,17 @@ public class DashboardPanel extends JPanel implements Refreshable {
     }
 
     /**
-     * Request counters are computed from the same request list and status categories
-     * the filtered pages use, so a counter always equals the list it opens.
+     * Request counters are computed from today's activity and the same status
+     * categories the filtered pages use, so a card always opens its matching status.
      */
     private void loadDashboardCounts() {
         new SwingWorker<int[], Void>() {
             @Override
             protected int[] doInBackground() throws Exception {
-                List<BorrowRequest> requests = requestController.findVisibleRequests(user);
+                // Only today's activity is counted. Historical requests stay in the
+                // database and in Transaction History; a new day starts at zero here.
+                List<BorrowRequest> requests = requestController.findDailyActivity(
+                        user, src.ui.components.DateFilter.today());
                 if (isBorrower()) {
                     int active = 0;
                     for (BorrowRequest request : requests) {
@@ -422,8 +427,11 @@ public class DashboardPanel extends JPanel implements Refreshable {
     }
 
     private boolean isStaff() {
-        return "ICT_STAFF".equalsIgnoreCase(user.getRole())
-                || "FACILITY_STAFF".equalsIgnoreCase(user.getRole());
+        return isIctStaff() || "FACILITY_STAFF".equalsIgnoreCase(user.getRole());
+    }
+
+    private boolean isIctStaff() {
+        return "ICT_STAFF".equalsIgnoreCase(user.getRole());
     }
 
     private boolean isDirector() {

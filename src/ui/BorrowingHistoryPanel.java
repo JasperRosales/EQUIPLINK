@@ -75,6 +75,10 @@ public class BorrowingHistoryPanel extends JPanel implements Refreshable {
         dateFilter.addChangeListener(() -> showHistory(loaded));
         tools.add(statusFilter);
         tools.add(dateFilter);
+        PrimaryButton refreshBtn = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
+        refreshBtn.setToolTipText("Return calendar to current date");
+        refreshBtn.addActionListener(event -> dateFilter.resetToToday());
+        tools.add(refreshBtn);
         filters.add(tools, BorderLayout.EAST);
         titleBar.add(filters, BorderLayout.CENTER);
         add(titleBar);

@@ -18,6 +18,7 @@ import src.ui.PasswordResetRequestsPanel;
 import src.ui.MyRequestsPanel;
 import src.ui.NotificationsPanel;
 import src.ui.RequestQueuePanel;
+import src.ui.RoomManagementPanel;
 import src.ui.SettingsPanel;
 import src.ui.UserManagementPanel;
 import src.ui.UiSupport;
@@ -71,6 +72,8 @@ public class MainLayout extends JPanel {
         private boolean syncing;
         private long lastOverdueSweep;
         private long lastReload = System.currentTimeMillis();
+        private java.time.LocalDate lastSyncDate =
+                java.time.LocalDate.now(java.time.ZoneId.of("Asia/Manila"));
         private static final int LIVE_SYNC_MS = 8000;
         private static final long OVERDUE_SWEEP_MS = 60_000L;
         private static final long TIME_REFRESH_MS = 5 * 60_000L;
@@ -124,6 +127,7 @@ public class MainLayout extends JPanel {
                         EquipmentController equipmentController,
                         NotificationController notificationController) {
                 this.user = user;
+                this.notificationsEnabled = user == null || user.isNotificationsEnabled();
                 this.authController = authController;
                 this.requestController = requestController;
                 this.equipmentController = equipmentController;
@@ -314,24 +318,29 @@ public class MainLayout extends JPanel {
                                                 "Dashboard", "Inventory", "Requests",
                                                 "Schedule & Assignment", "Transaction History",
                                                 "Password Requests", "User Management",
-                                                "All Requests", "Notifications", "Settings"
+                                                "Venue Management",
+                                                "Notifications", "Settings"
                                 };
                         case "FACILITY_STAFF":
                                 return new String[] {
                                                 "Dashboard", "Inventory", "Requests",
                                                 "Schedule & Assignment", "Transaction History",
-                                                "All Requests", "Notifications", "Settings"
+                                                "Notifications", "Settings"
                                 };
                         case "DIRECTOR":
                                 return new String[] {
-                                                "Dashboard", "Request Approval", "All Requests",
+                                                "Dashboard", "Request Approval", "Transaction History",
                                                 "Notifications", "Settings"
                                 };
                         case "ADMIN":
+                                return new String[] {
+                                                "Dashboard", "Inventory", "Borrowing Requests",
+                                                "All Requests", "Notifications", "Settings"
+                                };
                         default:
                                 return new String[] {
-                                                "Dashboard", "Borrowing Requests", "All Requests",
-                                                "Notifications", "Settings"
+                                                "Dashboard", "Inventory", "Borrowing Requests",
+                                                "All Requests", "Password Requests", "Notifications", "Settings"
                                 };
                 }
         }
@@ -442,7 +451,7 @@ public class MainLayout extends JPanel {
                                 return new SettingsPanel(
                                                 user, authController, notificationsEnabled,
                                                 this::refreshCurrentPage,
-                                                enabled -> notificationsEnabled = enabled);
+                                                this::saveNotificationPreference);
                         case "Notifications":
                                 return new NotificationsPanel(
                                                 user, notificationController, requestController,
@@ -468,12 +477,13 @@ public class MainLayout extends JPanel {
                                 }
                                 return infoPage(item, "This page is available to equipment staff.");
                         case "Transaction History":
-                                if (isStaff()) {
+                                if (isStaff() || isDirectorRole() || isAdminRole()) {
                                         return new RequestQueuePanel(
                                                         user, requestController,
-                                                        RequestQueuePanel.Mode.TRANSACTION_HISTORY);
+                                                        RequestQueuePanel.Mode.TRANSACTION_HISTORY,
+                                                        pageFilter);
                                 }
-                                return infoPage(item, "This page is available to equipment staff.");
+                                return infoPage(item, "This page is available to staff and administrators.");
                         case "Borrowing Requests":
                                 if ("ADMIN".equals(normalizeRole(user.getRole()))) {
                                         return new RequestQueuePanel(
@@ -495,17 +505,31 @@ public class MainLayout extends JPanel {
                                                         this::editRequest, this::refreshCurrentPage,
                                                         pageFilter);
                                 }
+                                if (isStaff() || isDirectorRole()) {
+                                        // Facility Staff no longer has a separate All Requests
+                                        // page, and the Director's page is Transaction History.
+                                        return new RequestQueuePanel(
+                                                        user, requestController,
+                                                        RequestQueuePanel.Mode.TRANSACTION_HISTORY,
+                                                        pageFilter);
+                                }
                                 return new RequestQueuePanel(
                                                 user, requestController,
                                                 RequestQueuePanel.Mode.ALL_REQUESTS, pageFilter);
                         case "Password Requests":
-                                if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
+                                String role = normalizeRole(user.getRole());
+                                if ("ICT_STAFF".equals(role)) {
                                         return new PasswordResetRequestsPanel(user, authController);
                                 }
                                 return infoPage(item, "This page is available to ICT system administrators.");
                         case "User Management":
                                 if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
                                         return new UserManagementPanel(user, authController);
+                                }
+                                return infoPage(item, "This page is available to ICT system administrators.");
+                        case "Venue Management":
+                                if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
+                                        return new RoomManagementPanel(user);
                                 }
                                 return infoPage(item, "This page is available to ICT system administrators.");
                         default:
@@ -594,6 +618,8 @@ public class MainLayout extends JPanel {
                                 return "Equipment currently released to you";
                         case "Borrowing Request":
                                 return "Your completed, cancelled, and declined requests";
+                        case "Transaction History":
+                                return "Pending, approved, declined, overdue, and completed records";
                         case "Settings":
                                 return "Appearance, notifications, and account security";
                         case "Notifications":
@@ -612,7 +638,19 @@ public class MainLayout extends JPanel {
                 return "ICT_STAFF".equals(role) || "FACILITY_STAFF".equals(role);
         }
 
+        private boolean isDirectorRole() {
+                return "DIRECTOR".equals(normalizeRole(user.getRole()));
+        }
+
+        private boolean isAdminRole() {
+                return "ADMIN".equals(normalizeRole(user.getRole()));
+        }
+
         private String navigationItemFor(String page) {
+                if (user != null && (isStaff() || isDirectorRole())
+                        && "All Requests".equals(page)) {
+                        return "Transaction History";
+                }
                 if (user != null && isBorrower() && "All Requests".equals(page)) {
                         return "My Requests";
                 }
@@ -625,6 +663,19 @@ public class MainLayout extends JPanel {
         private void refreshCurrentPage() {
                 applyTheme();
                 showPage(currentPage);
+        }
+
+        private void saveNotificationPreference(boolean enabled) {
+                if (user != null && authController != null) {
+                        try {
+                                authController.updateNotificationPreference(user.getUserId(), enabled);
+                        } catch (Exception exception) {
+                                throw new RuntimeException(
+                                        "Could not save the notification preference.", exception);
+                        }
+                        user.setNotificationsEnabled(enabled);
+                }
+                notificationsEnabled = enabled;
         }
 
         private void applyTheme() {
@@ -735,8 +786,12 @@ public class MainLayout extends JPanel {
                                                         && !lastChangeToken.equals(token);
                                         boolean stale = System.currentTimeMillis() - lastReload
                                                         > TIME_REFRESH_MS;
+                                        java.time.LocalDate today = java.time.LocalDate.now(
+                                                java.time.ZoneId.of("Asia/Manila"));
+                                        boolean newDay = !today.equals(lastSyncDate);
+                                        lastSyncDate = today;
                                         lastChangeToken = token;
-                                        if ((changed || stale)
+                                        if ((changed || stale || newDay)
                                                         && currentContent instanceof src.ui.Refreshable) {
                                                 lastReload = System.currentTimeMillis();
                                                 ((src.ui.Refreshable) currentContent).reloadData();
@@ -859,7 +914,7 @@ public class MainLayout extends JPanel {
                                                 if (!onLogin) {
                                                         msg += "\n(4:00 PM reminder)";
                                                 }
-                                                javax.swing.JOptionPane.showMessageDialog(
+                                                UiSupport.showMessageDialog(
                                                                 MainLayout.this,
                                                                 msg,
                                                                 "Pending request reminder",

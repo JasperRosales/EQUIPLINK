@@ -2,6 +2,7 @@ package src.ui;
 
 import src.model.BorrowRequest;
 import src.controller.BorrowRequestController;
+import src.util.UndoPolicy;
 import src.ui.components.PrimaryButton;
 import src.ui.components.SurfacePanel;
 
@@ -41,7 +42,9 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
     private List<BorrowRequest> requests = List.of();
     private boolean loading;
 
-    private static final String ALL_ACTIVE = "All active requests";
+    private static final String ALL_REQUESTS = "All requests";
+    private static final String ALL_ACTIVE = "Active requests";
+    private static final String RELEASED = "Released";
 
     public MyRequestsPanel(
             long borrowerId,
@@ -62,21 +65,34 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
         this.editHandler = editHandler;
         this.changedHandler = changedHandler;
         this.statusFilter = statusFilter == null ? "ALL" : statusFilter;
-        List<String> options = new ArrayList<>();
-        options.add(ALL_ACTIVE);
-        for (src.model.RequestStatus.Category category : src.model.RequestStatus.Category.values()) {
-            if (category != src.model.RequestStatus.Category.ALL) {
-                options.add(category.getLabel());
-            }
-        }
+        List<String> options = new ArrayList<>(List.of(
+                ALL_REQUESTS,
+                ALL_ACTIVE,
+                src.model.RequestStatus.Category.PENDING.getLabel(),
+                src.model.RequestStatus.Category.APPROVED.getLabel(),
+                RELEASED,
+                src.model.RequestStatus.Category.COMPLETED.getLabel(),
+                src.model.RequestStatus.Category.DECLINED.getLabel(),
+                src.model.RequestStatus.Category.CANCELLED.getLabel(),
+                src.model.RequestStatus.Category.NEEDS_ACTION.getLabel(),
+                src.model.RequestStatus.Category.OVERDUE.getLabel()));
         categoryFilter = new JComboBox<>(options.toArray(new String[0]));
         if ("PENDING".equals(this.statusFilter)) {
             categoryFilter.setSelectedItem(src.model.RequestStatus.Category.PENDING.getLabel());
         } else if ("BORROWED".equals(this.statusFilter)) {
-            categoryFilter.setSelectedItem(src.model.RequestStatus.Category.FULLY_RELEASED.getLabel());
+            categoryFilter.setSelectedItem(RELEASED);
         } else if (!"ALL".equals(this.statusFilter)) {
-            categoryFilter.setSelectedItem(
-                    src.model.RequestStatus.Category.fromLabel(this.statusFilter).getLabel());
+            src.model.RequestStatus.Category initial =
+                    src.model.RequestStatus.Category.fromLabel(this.statusFilter);
+            String label = switch (initial) {
+                case ADMIN_REVIEW, DIRECTOR_REVIEW, FINAL_APPROVED ->
+                        src.model.RequestStatus.Category.APPROVED.getLabel();
+                case PARTIALLY_RELEASED, FULLY_RELEASED -> RELEASED;
+                case PARTIALLY_APPROVED, FULLY_APPROVED ->
+                        src.model.RequestStatus.Category.APPROVED.getLabel();
+                default -> initial.getLabel();
+            };
+            categoryFilter.setSelectedItem(options.contains(label) ? label : ALL_REQUESTS);
         }
 
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -107,6 +123,13 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
         tools.add(categoryFilter);
         tools.add(dateFilter);
         tools.add(dateSort);
+        PrimaryButton refresh = new PrimaryButton("Refresh", PrimaryButton.Style.SECONDARY);
+        refresh.setToolTipText("Reload requests and return the calendar to today");
+        refresh.addActionListener(event -> {
+            dateFilter.resetToToday();
+            reload();
+        });
+        tools.add(refresh);
         filters.add(tools, BorderLayout.EAST);
         add(filters);
         add(Box.createVerticalStrut(8));
@@ -167,6 +190,7 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
 
     private void showRequests() {
         requestCards.removeAll();
+        dateFilter.setRequestDays(buildRequestDates());
         String query = search.getText().trim().toLowerCase();
         List<BorrowRequest> filtered = new ArrayList<>();
         for (BorrowRequest request : requests) {
@@ -199,18 +223,17 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
 
     private boolean matchesFilter(BorrowRequest request) {
         String selected = String.valueOf(categoryFilter.getSelectedItem());
+        if (ALL_REQUESTS.equals(selected)) {
+            return true;
+        }
         if (ALL_ACTIVE.equals(selected)) {
             return isActive(request);
         }
-        src.model.RequestStatus.Category category =
-                src.model.RequestStatus.Category.fromLabel(selected);
-        if (category == src.model.RequestStatus.Category.FULLY_RELEASED
-                && "BORROWED".equals(statusFilter)) {
-            // "Borrowed" shows every request with equipment currently released.
+        if (RELEASED.equals(selected)) {
             return src.model.RequestStatus.Category.FULLY_RELEASED.matches(request, null)
                     || src.model.RequestStatus.Category.PARTIALLY_RELEASED.matches(request, null);
         }
-        return category.matches(request, null);
+        return src.model.RequestStatus.Category.fromLabel(selected).matches(request, null);
     }
 
     private static boolean isActive(BorrowRequest request) {
@@ -229,6 +252,22 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
             }
         }
         return false;
+    }
+
+    /** Dates with at least one request, so both calendars use the same blue highlight. */
+    private java.util.Set<java.time.LocalDate> buildRequestDates() {
+        java.util.Set<java.time.LocalDate> days = new java.util.HashSet<>();
+        for (BorrowRequest request : requests) {
+            if (request.getEventDate() != null) {
+                days.add(request.getEventDate());
+            }
+            for (src.model.RequestOccurrence occurrence : request.getOccurrences()) {
+                if (occurrence.getEventDate() != null) {
+                    days.add(occurrence.getEventDate());
+                }
+            }
+        }
+        return days;
     }
 
     private String searchableText(BorrowRequest request) {
@@ -327,10 +366,18 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
             PrimaryButton edit = new PrimaryButton("Edit", PrimaryButton.Style.SECONDARY);
             edit.addActionListener(event -> editHandler.accept(request));
             actions.add(edit);
-            PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
-            delete.addActionListener(event -> deleteRequest(request));
-            actions.add(delete);
         }
+        if (canReceive(request)) {
+            PrimaryButton receive = new PrimaryButton("Receive");
+            receive.addActionListener(event -> receiveRequest(request));
+            actions.add(receive);
+        }
+        // Every request can be removed by its owner, including completed ones.
+        PrimaryButton delete = new PrimaryButton("Delete", PrimaryButton.Style.DANGER);
+        delete.setToolTipText("Delete this request (undo available for "
+                + src.util.UndoPolicy.RECOVERY_LABEL + ")");
+        delete.addActionListener(event -> deleteRequest(request, delete));
+        actions.add(delete);
         card.add(actions, BorderLayout.SOUTH);
         return card;
     }
@@ -340,27 +387,70 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
                 || "NEEDS_ACTION".equals(request.getStatus());
     }
 
+    private boolean canReceive(BorrowRequest request) {
+        if (request == null) return false;
+        if (!"RELEASED".equalsIgnoreCase(request.getStatus())) return false;
+        for (src.model.DepartmentStatus ds : request.getDepartments()) {
+            if ("RELEASED".equalsIgnoreCase(ds.getStatus())) return true;
+        }
+        return false;
+    }
+
     private void showDetails(BorrowRequest request) {
         Window owner = javax.swing.SwingUtilities.getWindowAncestor(this);
         new RequestDetailsDialog(owner, request).setVisible(true);
     }
 
-    private void deleteRequest(BorrowRequest request) {
-        int answer = JOptionPane.showConfirmDialog(
+    private void receiveRequest(BorrowRequest request) {
+        int ans = UiSupport.showConfirmDialog(this,
+                "Confirm you have received the released equipment for request " + request.getRequestCode() + "?",
+                "Confirm receipt", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (ans != JOptionPane.YES_OPTION) {
+            return;
+        }
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                src.model.User actor = new src.model.User(borrowerId, "", "", "", "", "BORROWER", "", true);
+                requestController.receiveByBorrower(actor, request.getRequestId());
+                return null;
+            }
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    changedHandler.run();
+                    UiSupport.showMessageDialog(MyRequestsPanel.this, "Receipt confirmed. Staff has been notified.", "Received", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() == null ? ex : ex.getCause();
+                    UiSupport.showMessageDialog(MyRequestsPanel.this, c.getMessage(), "Unable to confirm receipt", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void deleteRequest(BorrowRequest request, javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        long requestId = request.getRequestId();
+        String code = request.getRequestCode();
+        int answer = UiSupport.showConfirmDialog(
                 this,
-                "Remove " + request.getRequestCode()
-                        + " from your active requests? It will be recorded as cancelled in your history.",
+                "Delete " + code + "? It will be removed from your requests.\n"
+                        + "You can undo this for " + UndoPolicy.RECOVERY_LABEL + ".",
                 "Delete request",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.YES_OPTION) {
+            UiSupport.endAction(source);
             return;
         }
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
-                requestController.deleteRequest(borrowerId, request.getRequestId());
+                requestController.deleteRequest(borrowerId, requestId);
                 return null;
             }
 
@@ -369,12 +459,49 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
                 try {
                     get();
                     changedHandler.run();
+                    offerUndo(code, requestId);
                 } catch (Exception exception) {
                     String message = exception.getCause() == null
                             ? exception.getMessage()
                             : exception.getCause().getMessage();
-                    JOptionPane.showMessageDialog(
+                    UiSupport.showMessageDialog(
                             MyRequestsPanel.this, message, "Unable to delete request",
+                            JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    UiSupport.endAction(source);
+                }
+            }
+        }.execute();
+    }
+
+    /** Shows the recovery prompt immediately after a successful delete. */
+    private void offerUndo(String code, long requestId) {
+        int choice = UiSupport.showUndoDialog(this,
+                code + " was deleted.\nUndo is available for " + UndoPolicy.RECOVERY_LABEL + ".",
+                "Request deleted");
+        if (choice != 0) {
+            return;
+        }
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                requestController.restoreRequest(borrowerId, requestId);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    changedHandler.run();
+                    UiSupport.showMessageDialog(MyRequestsPanel.this,
+                            code + " was restored with its original status.",
+                            "Request restored", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception exception) {
+                    Throwable cause = exception.getCause() == null
+                            ? exception : exception.getCause();
+                    UiSupport.showMessageDialog(MyRequestsPanel.this,
+                            cause.getMessage(), "Unable to restore request",
                             JOptionPane.ERROR_MESSAGE);
                 }
             }

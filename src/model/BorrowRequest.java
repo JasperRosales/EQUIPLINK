@@ -27,6 +27,8 @@ public class BorrowRequest {
     private final List<EquipmentRequestItem> equipmentItems;
     private final List<RequestOccurrence> occurrences;
     private String borrowerType;
+    private String adminStatus;
+    private String directorStatus;
     private List<DepartmentStatus> departments = List.of();
 
     /** Faculty first, then everything else; stable for other orderings. */
@@ -118,6 +120,20 @@ public class BorrowRequest {
 
     public void setBorrowerType(String borrowerType) {
         this.borrowerType = borrowerType;
+    }
+
+    /** Facility Admin's decision (APPROVED / REJECTED), loaded from borrow_requests. */
+    public String getAdminStatus() { return adminStatus; }
+
+    public void setAdminStatus(String adminStatus) {
+        this.adminStatus = adminStatus;
+    }
+
+    /** Campus Director's decision (APPROVED / REJECTED), loaded from borrow_requests. */
+    public String getDirectorStatus() { return directorStatus; }
+
+    public void setDirectorStatus(String directorStatus) {
+        this.directorStatus = directorStatus;
     }
 
     /** Per-department (ICT / Facility) processing records. */

@@ -28,7 +28,8 @@ public final class ItemInspectionDialog {
     public enum Kind { ASSIGN, RELEASE, RETURN }
 
     static final String[] CONDITIONS = {
-            "Good", "Fair", "Minor wear", "Damaged", "Not working"
+            "Good Condition", "Fair", "Minor wear", "Damaged",
+            "Incomplete", "Not working"
     };
 
     private ItemInspectionDialog() {
@@ -51,7 +52,7 @@ public final class ItemInspectionDialog {
             items.add(item);
         }
         if (items.isEmpty()) {
-            JOptionPane.showMessageDialog(parent, "There are no items to process.",
+            UiSupport.showMessageDialog(parent, "There are no items to process.",
                     "Nothing to process", JOptionPane.INFORMATION_MESSAGE);
             return null;
         }
@@ -147,7 +148,7 @@ public final class ItemInspectionDialog {
             case RETURN -> "Return inspection";
         };
         while (true) {
-            int answer = JOptionPane.showConfirmDialog(parent, content, title,
+            int answer = UiSupport.showConfirmDialog(parent, content, title,
                     JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
             if (answer != JOptionPane.OK_OPTION) {
                 return null;
@@ -185,7 +186,7 @@ public final class ItemInspectionDialog {
             if (error == null) {
                 return result;
             }
-            JOptionPane.showMessageDialog(parent, error, "Check the details",
+            UiSupport.showMessageDialog(parent, error, "Check the details",
                     JOptionPane.WARNING_MESSAGE);
         }
     }

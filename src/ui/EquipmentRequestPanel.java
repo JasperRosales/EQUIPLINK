@@ -51,6 +51,8 @@ public class EquipmentRequestPanel extends JPanel {
 
     private final long borrowerId;
     private final boolean facultyMonthly;
+    private final String actorRole;
+    private final boolean canManageRooms;
     private final BorrowRequestController requestController;
     private final EquipmentController equipmentController;
     private final BorrowRequest existingRequest;
@@ -95,6 +97,8 @@ public class EquipmentRequestPanel extends JPanel {
             List<EquipmentRequestItem> preselected) {
         this.borrowerId = user.getUserId();
         this.facultyMonthly = "FACULTY".equalsIgnoreCase(user.getBorrowerType());
+        this.actorRole = user == null || user.getRole() == null ? "" : user.getRole().trim();
+        this.canManageRooms = "ICT_STAFF".equalsIgnoreCase(actorRole);
         this.requestController = requestController;
         this.equipmentController = equipmentController;
         this.existingRequest = existingRequest;
@@ -169,6 +173,47 @@ public class EquipmentRequestPanel extends JPanel {
         return value == null ? "" : value.toString().trim();
     }
 
+    private void addVenueRoom(javax.swing.AbstractButton source) {
+        if (!UiSupport.beginAction(source)) {
+            return;
+        }
+        if (!canManageRooms) {
+            UiSupport.endAction(source);
+            UiSupport.showMessageDialog(this,
+                    "Only the ICT System Admin can add rooms.", "Not authorized",
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String room = UiSupport.showInputDialog(
+                this, "Room or venue name:", "Add room",
+                javax.swing.JOptionPane.QUESTION_MESSAGE);
+        if (room == null || room.isBlank()) {
+            UiSupport.endAction(source);
+            return;
+        }
+        try {
+            String current = venueText();
+            boolean added = VenueOptions.addRoom(room, actorRole);
+            venue.removeAllItems();
+            for (String option : VenueOptions.load()) {
+                venue.addItem(option);
+            }
+            venue.setSelectedIndex(-1);
+            venue.getEditor().setItem(current);
+            UiSupport.showMessageDialog(this,
+                    added ? "Room added to the Venue dropdown."
+                            : "That room is already in the Venue dropdown.",
+                    added ? "Room added" : "Room already exists",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception exception) {
+            UiSupport.showMessageDialog(this,
+                    "Unable to add room: " + exception.getMessage(), "Room not added",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } finally {
+            UiSupport.endAction(source);
+        }
+    }
+
     private void buildForm() {
         JPanel introduction = new JPanel(new BorderLayout(8, 3));
         introduction.setOpaque(false);
@@ -199,7 +244,18 @@ public class EquipmentRequestPanel extends JPanel {
         styleField(position);
         styleArea(purpose);
         int row = 1;
-        addFormField(eventCard, "Venue", venue, row, 0);
+        JComponent venueField = venue;
+        if (canManageRooms) {
+            JPanel venueRow = new JPanel(new BorderLayout(6, 0));
+            venueRow.setOpaque(false);
+            PrimaryButton addRoom = new PrimaryButton("Add room", PrimaryButton.Style.SECONDARY);
+            addRoom.setToolTipText("Add a room to the Venue dropdown");
+            addRoom.addActionListener(event -> addVenueRoom(addRoom));
+            venueRow.add(venue, BorderLayout.CENTER);
+            venueRow.add(addRoom, BorderLayout.EAST);
+            venueField = venueRow;
+        }
+        addFormField(eventCard, "Venue", venueField, row, 0);
         addFormField(eventCard, "Event date (YYYY-MM-DD)", eventDate, row++, 1);
         addFormField(eventCard, "Start time (hh:mm + AM/PM)", startTime, row, 0);
         addFormField(eventCard, "End time (hh:mm + AM/PM)", endTime, row++, 1);
@@ -643,7 +699,7 @@ public class EquipmentRequestPanel extends JPanel {
     }
 
     private void showMessage(String message, String title) {
-        javax.swing.JOptionPane.showMessageDialog(
+        UiSupport.showMessageDialog(
                 this, message, title, javax.swing.JOptionPane.INFORMATION_MESSAGE);
     }
 

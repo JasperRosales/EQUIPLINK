@@ -7,6 +7,7 @@ import src.model.User;
 import src.service.BorrowRequestService;
 
 import java.util.List;
+import java.util.Set;
 
 public class BorrowRequestController {
 
@@ -49,6 +50,24 @@ public class BorrowRequestController {
         requestService.deleteRequest(borrowerId, requestId);
     }
 
+    /** Undo a borrower deletion while it is still inside the recovery window. */
+    public void restoreRequest(long borrowerId, long requestId) throws Exception {
+        requestService.restoreRequest(borrowerId, requestId);
+    }
+
+    public void deleteRequestAsAdmin(User actor, long requestId, String reason)
+            throws Exception {
+        requireRole(actor, "ICT_STAFF");
+        requestService.deleteRequestAsAdmin(
+                actor.getRole(), actor.getUserId(), requestId, reason);
+    }
+
+    /** Undo an ICT System Admin deletion while it is still inside the recovery window. */
+    public void restoreRequestAsAdmin(User actor, long requestId) throws Exception {
+        requireRole(actor, "ICT_STAFF");
+        requestService.restoreRequestAsAdmin(actor.getRole(), actor.getUserId(), requestId);
+    }
+
     public int countActiveForBorrower(long borrowerId) throws Exception {
         return requestService.countActiveForBorrower(borrowerId);
     }
@@ -84,6 +103,13 @@ public class BorrowRequestController {
     public List<BorrowRequest> findAllRequests(User actor) throws Exception {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF", "ADMIN", "DIRECTOR");
         return requestService.findAllRequests(actor.getRole());
+    }
+
+    /** Requests with activity today, used for role dashboard counters. */
+    public List<BorrowRequest> findDailyActivity(User actor, java.time.LocalDate day)
+            throws Exception {
+        if (actor == null) return List.of();
+        return requestService.findDailyActivity(actor.getRole(), actor.getUserId(), day);
     }
 
     /** Every request the actor can see, used for dashboard counters. */
@@ -166,6 +192,40 @@ public class BorrowRequestController {
         requireRole(actor, "ICT_STAFF", "FACILITY_STAFF");
         requestService.recordStaffReturn(
                 actor.getRole(), actor.getUserId(), requestId, inspections);
+    }
+
+    public void receiveByBorrower(User actor, long requestId) throws Exception {
+        if (actor == null || !"BORROWER".equalsIgnoreCase(actor.getRole())) {
+            throw new SecurityException("Only borrowers can confirm receipt.");
+        }
+        requestService.receiveByBorrower(actor.getUserId(), requestId);
+    }
+
+    private static final Set<String> REQUEST_FORM_EXPORT_ROLES = Set.of(
+            "ICT_STAFF", "FACILITY_STAFF", "ADMIN", "DIRECTOR");
+
+    /** Download is limited to four authorized roles and final-stage requests. */
+    public boolean canExportRequestForm(User actor, BorrowRequest request) {
+        if (actor == null || request == null || actor.getRole() == null) {
+            return false;
+        }
+        String role = actor.getRole().trim().toUpperCase();
+        String status = request.getStatus();
+        return REQUEST_FORM_EXPORT_ROLES.contains(role)
+                && ("APPROVED".equals(status) || "COMPLETED".equals(status));
+    }
+
+    /** Re-checks role and the database status at the moment of export; never trust a visible button. */
+    public void verifyRequestFormExport(User actor, BorrowRequest request) throws Exception {
+        requireRole(actor, REQUEST_FORM_EXPORT_ROLES.toArray(String[]::new));
+        if (request == null || request.getRequestId() <= 0) {
+            throw new IllegalArgumentException("A valid request is required.");
+        }
+        BorrowRequest current = findRequestForUser(actor, request.getRequestId());
+        if (!canExportRequestForm(actor, current)) {
+            throw new SecurityException(
+                    "Request forms can only be downloaded for approved or completed requests.");
+        }
     }
 
     private void requireRole(User actor, String... allowedRoles) {
