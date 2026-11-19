@@ -39,10 +39,7 @@ public final class SplashWindow extends JWindow {
         setContentPane(root);
         setSize(new Dimension(432, 330));
         setLocationRelativeTo(null);
-        javax.swing.ImageIcon icon = BrandLogo.icon(64);
-        if (icon != null) {
-            setIconImage(icon.getImage());
-        }
+        setIconImages(src.ui.BrandLogo.windowIcons());
     }
 
     public void setStatus(String text) {

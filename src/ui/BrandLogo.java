@@ -27,30 +27,60 @@ public final class BrandLogo {
         return scale(full, height);
     }
 
-    /** Logo mark only (no wordmark) at the given height, or null if missing. */
+    /** Display scales to pre-render, so HiDPI screens get real pixels, not upscaling. */
+    private static final double[] SCALES = { 1, 1.25, 1.5, 1.75, 2, 2.5, 3 };
+
+    /** Sharp logo mark at the given height (logical px), rendered from vector art. */
     public static ImageIcon icon(int height) {
-        load();
-        return scale(icon, height);
+        int width = Math.max(1, (int) Math.round(height * src.ui.components.LogoAnimationPanel.markAspect()));
+        return new ImageIcon(multiResolution(width, height,
+                (w, h) -> src.ui.components.LogoAnimationPanel.renderStill(w, h)));
     }
 
     /** The logo mark centred on a rounded square of the given color. */
     public static ImageIcon badge(int size, java.awt.Color background) {
+        return new ImageIcon(multiResolution(size, size, (w, h) -> renderBadge(w, background)));
+    }
+
+    /** Window icons at the sizes Windows and Linux pick from. */
+    public static java.util.List<java.awt.Image> windowIcons() {
+        java.util.List<java.awt.Image> icons = new java.util.ArrayList<>();
+        for (int size : new int[] { 16, 20, 24, 32, 40, 48, 64, 128, 256 }) {
+            icons.add(renderBadge(size, src.ui.AppTheme.LIGHT_BG));
+        }
+        return icons;
+    }
+
+    private static BufferedImage renderBadge(int size, java.awt.Color background) {
         BufferedImage result = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = result.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setColor(background);
-        g.fillRoundRect(0, 0, size, size, size / 3, size / 3);
-        int pad = Math.max(3, size / 6);
-        load();
-        if (icon != null) {
-            float s = Math.min((size - pad * 2f) / icon.getWidth(), (size - pad * 2f) / icon.getHeight());
-            int w = Math.max(1, Math.round(icon.getWidth() * s));
-            int h = Math.max(1, Math.round(icon.getHeight() * s));
-            ImageIcon scaled = scale(icon, h);
-            g.drawImage(scaled.getImage(), (size - w) / 2, (size - h) / 2, null);
-        }
+        g.fill(new java.awt.geom.RoundRectangle2D.Double(0, 0, size, size, size / 3.0, size / 3.0));
+        double pad = Math.max(2, size / 9.0);
+        double aspect = src.ui.components.LogoAnimationPanel.markAspect();
+        double boxW = size - pad * 2;
+        double boxH = size - pad * 2;
+        int w = (int) Math.round(Math.min(boxW, boxH * aspect));
+        int h = (int) Math.round(w / aspect);
+        g.drawImage(src.ui.components.LogoAnimationPanel.renderStill(w, h),
+                (size - w) / 2, (size - h) / 2, null);
         g.dispose();
-        return new ImageIcon(result);
+        return result;
+    }
+
+    private interface Renderer {
+        BufferedImage render(int width, int height);
+    }
+
+    private static java.awt.Image multiResolution(int width, int height, Renderer renderer) {
+        java.awt.Image[] variants = new java.awt.Image[SCALES.length];
+        for (int i = 0; i < SCALES.length; i++) {
+            variants[i] = renderer.render(
+                    Math.max(1, (int) Math.round(width * SCALES[i])),
+                    Math.max(1, (int) Math.round(height * SCALES[i])));
+        }
+        return new java.awt.image.BaseMultiResolutionImage(variants);
     }
 
     private static synchronized void load() {
@@ -78,15 +108,6 @@ public final class BrandLogo {
             }
         }
         icon = bestStart > 0 ? trim(full, 0, bestStart) : full;
-        // Prefer the resting frame of the animated logo sprite as the mark.
-        src.ui.components.LogoAnimationPanel.SpriteSheet sprite =
-                src.ui.components.LogoAnimationPanel.bundledSprite(false);
-        if (sprite != null) {
-            BufferedImage mark = trim(sprite.lastFrame(), 0, sprite.lastFrame().getHeight());
-            if (mark != null) {
-                icon = mark;
-            }
-        }
     }
 
     private static BufferedImage read() {

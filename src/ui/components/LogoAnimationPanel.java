@@ -90,7 +90,12 @@ public class LogoAnimationPanel extends LogoAnimationPanelPart1 {
         g.translate(w / 2.0, h / 2.0);
         g.scale(s, s);
         g.translate(-LOGO_BOUNDS.getCenterX(), -LOGO_BOUNDS.getCenterY());
+        drawLogo(g, t);
+        g.setTransform(old);
+    }
 
+    /** Draws the logo at time t in design coordinates (caller sets the transform). */
+    void drawLogo(Graphics2D g, double t) {
         // 1) the three red bands sweep in (staggered)
         drawSweep(g, topBand,    progress(t, 0.00, 0.80), -1);
         drawSweep(g, bottomBand, progress(t, 0.30, 1.10), +1);
@@ -104,8 +109,47 @@ public class LogoAnimationPanel extends LogoAnimationPanelPart1 {
         // 3) light shine passes over the logo
         double shineP = progress(t, 2.30, 3.10);
         if (shineP > 0 && shineP < 1) drawShine(g, shineP);
+    }
 
-        g.setTransform(old);
+    /**
+     * Renders the finished logo as vector art straight at the requested pixel size, with
+     * the mark filling the image. Use this for still logos so they stay sharp at any
+     * size or display scale (the sprite sheet frames are only 384x256).
+     */
+    public static BufferedImage renderStill(int width, int height) {
+        LogoAnimationPanel renderer = new LogoAnimationPanel();
+        Rectangle2D b = renderer.markBounds();
+        BufferedImage image = new BufferedImage(Math.max(1, width), Math.max(1, height),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING,
+                RenderingHints.VALUE_COLOR_RENDER_QUALITY);
+        double s = Math.min(width / b.getWidth(), height / b.getHeight());
+        g.translate(width / 2.0, height / 2.0);
+        g.scale(s, s);
+        g.translate(-b.getCenterX(), -b.getCenterY());
+        renderer.drawLogo(g, INTRO_LENGTH);
+        g.dispose();
+        return image;
+    }
+
+    /** Width / height of the finished mark. */
+    public static double markAspect() {
+        Rectangle2D b = new LogoAnimationPanel().markBounds();
+        return b.getWidth() / b.getHeight();
+    }
+
+    private Rectangle2D markBounds() {
+        Rectangle2D b = topBand.getBounds2D();
+        b.add(bottomBand.getBounds2D());
+        b.add(bar.getBounds2D());
+        // Small breathing room for anti-aliased edges and the node rings.
+        double pad = 6;
+        return new Rectangle2D.Double(b.getX() - pad, b.getY() - pad,
+                b.getWidth() + pad * 2, b.getHeight() + pad * 2);
     }
 
     // ------------------------------------------------------------------ sprite export

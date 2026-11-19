@@ -22,10 +22,7 @@ public class LoginFrame extends LoginFramePart1 {
         this.onLoginSuccess = onLoginSuccess;
 
         setTitle("EquipLink | Login");
-        ImageIcon windowIcon = BrandLogo.icon(64);
-        if (windowIcon != null) {
-            setIconImage(windowIcon.getImage());
-        }
+        setIconImages(src.ui.BrandLogo.windowIcons());
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(900, 720));
         setSize(1040, 760);
