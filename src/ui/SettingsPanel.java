@@ -134,7 +134,7 @@ public class SettingsPanel extends JPanel {
         details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
         addInfo(details, "Application name", "EquipLink");
         addInfo(details, "Application version", "1.0");
-        addInfo(details, "Database", "PostgreSQL");
+        addInfo(details, "Database", "SQLite (stored on this computer)");
         addInfo(details, "About EquipLink",
                 "A single place to request and manage campus equipment.");
         addInfo(details, "Help & support",
