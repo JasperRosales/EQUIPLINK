@@ -155,10 +155,7 @@ public class Main {
                 equipmentController, notificationController);
         JFrame frame = new JFrame("EquipLink | " + user.getRole());
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        javax.swing.ImageIcon windowIcon = src.ui.BrandLogo.icon(64);
-        if (windowIcon != null) {
-            frame.setIconImage(windowIcon.getImage());
-        }
+        frame.setIconImages(src.ui.BrandLogo.windowIcons());
         frame.setMinimumSize(new java.awt.Dimension(960, 640));
         frame.setSize(1280, 800);
         frame.setLocationRelativeTo(null);
