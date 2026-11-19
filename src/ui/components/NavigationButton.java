@@ -58,10 +58,15 @@ public class NavigationButton extends JButton {
         int w = getWidth() - m * 2;
         int ht = getHeight() - m * 2;
         if (a > 0.01f) {
-            // Active tab: a light #EEEEEE pill on the dark teal sidebar.
-            g.setColor(AppTheme.alpha(AppTheme.LIGHT_BG, Math.round(255 * a)));
-            g.fillRoundRect(m, m, w, ht, ARC, ARC);
+            // Active tab: a cream pill on the burgundy sidebar.
+            // The pill sweeps open from the left edge as the tab activates.
+            float e = Motion.easeOutBack(a);
+            int pillW = Math.max(ARC, Math.min(w, Math.round(w * e)));
+            g.setColor(AppTheme.alpha(AppTheme.LIGHT_BG, Math.round(255 * Math.min(1f, a * 1.4f))));
+            g.fillRoundRect(m, m, pillW, ht, ARC, ARC);
             int bar = Math.round((ht - 16) * a);
+            g.setColor(AppTheme.alpha(AppTheme.PRIMARY_LIGHT, Math.round(70 * a)));
+            g.fillRoundRect(m + 4, m + (ht - bar) / 2 - 2, 7, bar + 4, 7, 7);
             g.setColor(AppTheme.primary());
             g.fillRoundRect(m + 6, m + (ht - bar) / 2, 3, bar, 3, 3);
         }
@@ -72,6 +77,10 @@ public class NavigationButton extends JButton {
                     AppTheme.alpha(AppTheme.sidebarShadowDark(), Math.round(255 * h)));
         }
         g.dispose();
-        super.paintComponent(graphics);
+        // Label and icon nudge right on hover.
+        Graphics2D content = (Graphics2D) graphics.create();
+        content.translate(4f * h, 0);
+        super.paintComponent(content);
+        content.dispose();
     }
 }

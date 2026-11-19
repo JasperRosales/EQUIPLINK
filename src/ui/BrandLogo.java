@@ -10,7 +10,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Loads the EquipLink logo, trims its transparent padding, and scales it. */
+/** Loads the EquipLink logo (sprite mark and full artwork), trims padding, and scales it. */
 public final class BrandLogo {
 
     private static final String FILE = "received_1676750560533488-removebg-preview.png";
@@ -33,24 +33,38 @@ public final class BrandLogo {
         return scale(icon, height);
     }
 
+    /** The logo mark centred on a rounded square of the given color. */
+    public static ImageIcon badge(int size, java.awt.Color background) {
+        BufferedImage result = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = result.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(background);
+        g.fillRoundRect(0, 0, size, size, size / 3, size / 3);
+        int pad = Math.max(3, size / 6);
+        load();
+        if (icon != null) {
+            float s = Math.min((size - pad * 2f) / icon.getWidth(), (size - pad * 2f) / icon.getHeight());
+            int w = Math.max(1, Math.round(icon.getWidth() * s));
+            int h = Math.max(1, Math.round(icon.getHeight() * s));
+            ImageIcon scaled = scale(icon, h);
+            g.drawImage(scaled.getImage(), (size - w) / 2, (size - h) / 2, null);
+        }
+        g.dispose();
+        return new ImageIcon(result);
+    }
+
     private static synchronized void load() {
         if (loaded) {
             return;
         }
         loaded = true;
         BufferedImage source = read();
-        if (source == null) {
-            return;
-        }
-        full = trim(source, 0, source.getHeight());
-        if (full == null) {
-            return;
-        }
+        full = source == null ? null : trim(source, 0, source.getHeight());
         // The mark sits above the wordmark; split at the tallest transparent row gap.
         int gapStart = -1;
         int bestStart = -1;
         int bestLength = 0;
-        for (int y = 0; y < full.getHeight(); y++) {
+        for (int y = 0; full != null && y < full.getHeight(); y++) {
             if (rowEmpty(full, y)) {
                 if (gapStart < 0) {
                     gapStart = y;
@@ -64,6 +78,15 @@ public final class BrandLogo {
             }
         }
         icon = bestStart > 0 ? trim(full, 0, bestStart) : full;
+        // Prefer the resting frame of the animated logo sprite as the mark.
+        src.ui.components.LogoAnimationPanel.SpriteSheet sprite =
+                src.ui.components.LogoAnimationPanel.bundledSprite(false);
+        if (sprite != null) {
+            BufferedImage mark = trim(sprite.lastFrame(), 0, sprite.lastFrame().getHeight());
+            if (mark != null) {
+                icon = mark;
+            }
+        }
     }
 
     private static BufferedImage read() {

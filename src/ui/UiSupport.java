@@ -149,7 +149,7 @@ public final class UiSupport {
         } else {
             dialog = new JDialog((Frame) null, title, true);
         }
-        dialog.setContentPane(pane);
+        dialog.setContentPane(src.ui.components.Motion.popIn(pane));
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         dialog.setResizable(false);
         pane.addPropertyChangeListener(JOptionPane.VALUE_PROPERTY, e -> {

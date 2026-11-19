@@ -26,6 +26,11 @@ public class DashboardCard extends JPanel {
     private final JLabel amount;
     private final Tween hover = new Tween(this, 180);
     private final Tween press = new Tween(this, 110);
+    private final Motion.Clock shine = new Motion.Clock(this, 800);
+    private final Motion.Clock ripple = new Motion.Clock(this, 600);
+    private final Motion.Clock entrance = new Motion.Clock(this, 420);
+    private java.awt.Point rippleAt;
+    private long entranceDelayUntil;
     private Timer counter;
     private Runnable clickAction;
 
@@ -100,6 +105,9 @@ public class DashboardCard extends JPanel {
         component.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent event) {
+                if (hover.target() < 1f) {
+                    shine.start();
+                }
                 hover.to(1f);
             }
 
@@ -118,6 +126,9 @@ public class DashboardCard extends JPanel {
             @Override
             public void mousePressed(MouseEvent event) {
                 press.to(1f);
+                rippleAt = javax.swing.SwingUtilities.convertPoint(
+                        event.getComponent(), event.getPoint(), DashboardCard.this);
+                ripple.start();
             }
 
             @Override
@@ -140,6 +151,62 @@ public class DashboardCard extends JPanel {
         }
     }
 
+    /** Cards cascade in, each slightly after the one before it. */
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        int index = 0;
+        if (getParent() != null) {
+            for (Component sibling : getParent().getComponents()) {
+                if (sibling == this) {
+                    break;
+                }
+                if (sibling instanceof DashboardCard) {
+                    index++;
+                }
+            }
+        }
+        int delay = index * 70;
+        entranceDelayUntil = System.currentTimeMillis() + delay;
+        Timer kick = new Timer(Math.max(1, delay), e -> entrance.start());
+        kick.setRepeats(false);
+        kick.start();
+        repaint();
+    }
+
+    @Override
+    public void paint(Graphics graphics) {
+        float t = System.currentTimeMillis() < entranceDelayUntil ? 0f : entrance.progress();
+        if (t >= 1f) {
+            super.paint(graphics);
+            return;
+        }
+        if (t <= 0f) {
+            return;
+        }
+        Graphics2D g = (Graphics2D) graphics.create();
+        float scale = 0.9f + 0.1f * Motion.easeOutBack(t);
+        g.translate(getWidth() / 2.0, getHeight() / 2.0);
+        g.scale(scale, scale);
+        g.translate(-getWidth() / 2.0, -getHeight() / 2.0);
+        g.setComposite(java.awt.AlphaComposite.SrcOver.derive(Motion.easeOut(t)));
+        super.paint(g);
+        g.dispose();
+    }
+
+    @Override
+    protected void paintChildren(Graphics graphics) {
+        // Children ride along with the lifted card.
+        Graphics2D g = (Graphics2D) graphics.create();
+        g.translate(0, -liftOffset());
+        super.paintChildren(g);
+        g.dispose();
+    }
+
+    private float liftOffset() {
+        return 3f * hover.value() * (1f - press.value());
+    }
+
     @Override
     protected void paintComponent(Graphics graphics) {
         Graphics2D g = (Graphics2D) graphics.create();
@@ -149,7 +216,8 @@ public class DashboardCard extends JPanel {
         int y = MARGIN;
         int w = getWidth() - MARGIN * 2;
         int ht = getHeight() - MARGIN * 2;
-        float depth = (3.5f + 1.5f * h) * (1f - p);
+        g.translate(0, -liftOffset());
+        float depth = (3.5f + 2.5f * h) * (1f - p);
         if (p > 0.5f) {
             Neu.inset(g, x, y, w, ht, ARC, 3f * p, AppTheme.surface());
         } else {
@@ -159,8 +227,17 @@ public class DashboardCard extends JPanel {
             g.setColor(AppTheme.alpha(accent, Math.round(14 * h)));
             g.fillRoundRect(x, y, w, ht, ARC, ARC);
         }
+        if (h > 0f) {
+            // Soft accent ring glows in on hover.
+            g.setStroke(new java.awt.BasicStroke(1.4f));
+            g.setColor(AppTheme.alpha(accent, Math.round(90 * h)));
+            g.drawRoundRect(x, y, w - 1, ht - 1, ARC, ARC);
+        }
+        java.awt.Shape body = new java.awt.geom.RoundRectangle2D.Float(x, y, w, ht, ARC, ARC);
+        Motion.paintShine(g, body, shine.progress(), accent, 30);
+        Motion.paintRipple(g, body, rippleAt, ripple.progress(), accent, 40);
         // Accent pill grows on hover.
-        int pill = Math.round(28 + 22 * h);
+        int pill = Math.round(28 + 34 * h);
         g.setColor(accent);
         g.fillRoundRect(x + 17, y + 8, pill, 4, 4, 4);
         g.dispose();

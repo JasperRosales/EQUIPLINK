@@ -23,6 +23,10 @@ public class PrimaryButton extends JButton {
     private final Style style;
     private final Tween hover = new Tween(this, 150);
     private final Tween press = new Tween(this, 90);
+    private final Motion.Clock shine = new Motion.Clock(this, 650);
+    private final Motion.Clock ripple = new Motion.Clock(this, 520);
+    private java.awt.Point rippleAt;
+    private boolean wasRollover;
 
     public PrimaryButton(String text) {
         this(text, Style.PRIMARY);
@@ -41,8 +45,22 @@ public class PrimaryButton extends JButton {
         setRolloverEnabled(true);
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         getModel().addChangeListener(event -> {
-            hover.to(getModel().isRollover() && isEnabled() ? 1f : 0f);
+            boolean rollover = getModel().isRollover() && isEnabled();
+            if (rollover && !wasRollover) {
+                shine.start();
+            }
+            wasRollover = rollover;
+            hover.to(rollover ? 1f : 0f);
             press.to(getModel().isArmed() && getModel().isPressed() ? 1f : 0f);
+        });
+        addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent event) {
+                if (isEnabled()) {
+                    rippleAt = event.getPoint();
+                    ripple.start();
+                }
+            }
         });
     }
 
@@ -56,6 +74,9 @@ public class PrimaryButton extends JButton {
         int h = getHeight() - MARGIN * 2;
         float hv = hover.value();
         float pr = press.value();
+        // Lift slightly on hover; settle back down when pressed.
+        float lift = isEnabled() ? 1.5f * hv * (1f - pr) : 0f;
+        g.translate(0, -lift);
 
         if (!isEnabled()) {
             g.setColor(AppTheme.border());
@@ -82,10 +103,17 @@ public class PrimaryButton extends JButton {
             g.setColor(AppTheme.alpha(Color.WHITE, Math.round(40 + 25 * hv)));
             g.drawRoundRect(x, y, w - 1, h - 1, ARC, ARC);
         }
+        if (isEnabled()) {
+            java.awt.Shape body = new java.awt.geom.RoundRectangle2D.Float(x, y, w, h, ARC, ARC);
+            boolean light = style == Style.SECONDARY;
+            Color tint = light ? AppTheme.primary() : Color.WHITE;
+            Motion.paintShine(g, body, shine.progress(), tint, light ? 34 : 70);
+            Motion.paintRipple(g, body, rippleAt, ripple.progress(), tint, light ? 46 : 80);
+        }
         g.dispose();
-        if (pr > 0f) {
+        if (pr > 0f || lift > 0f) {
             Graphics2D text = (Graphics2D) graphics.create();
-            text.translate(0, Math.round(pr));
+            text.translate(0, pr - lift);
             super.paintComponent(text);
             text.dispose();
         } else {
