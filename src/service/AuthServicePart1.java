@@ -219,7 +219,8 @@ public abstract class AuthServicePart1 {
                     UPDATE users
                     SET password_hash = ?,
                         password_salt = ?,
-                        password_iterations = ?
+                        password_iterations = ?,
+                        must_change_password = FALSE
                     WHERE user_id = ?
                     """;
 

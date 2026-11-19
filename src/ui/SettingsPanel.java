@@ -46,6 +46,10 @@ public class SettingsPanel extends JPanel {
         add(Box.createVerticalStrut(10));
         add(securitySettings(user, authController));
         add(Box.createVerticalStrut(10));
+        if (AuthController.isAdministrator(user)) {
+            add(new RecoveryCodesSection(user, authController));
+            add(Box.createVerticalStrut(10));
+        }
         add(systemInformation());
     }
 
