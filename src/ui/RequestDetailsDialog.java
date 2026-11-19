@@ -337,6 +337,12 @@ public class RequestDetailsDialog extends JDialog {
                                 + (group.getReleasedByName() == null ? ""
                                         : " by " + group.getReleasedByName()));
             }
+            if (group.getReceivedAt() != null) {
+                section.row(multiple ? prefix + "received" : "Received",
+                        group.getReceivedAt().format(STAMP)
+                                + (group.getReceivedByName() == null ? ""
+                                        : " by " + group.getReceivedByName()));
+            }
             if (group.getInspectedAt() != null) {
                 section.row(multiple ? prefix + "returned" : "Returned",
                         group.getInspectedAt().format(STAMP)

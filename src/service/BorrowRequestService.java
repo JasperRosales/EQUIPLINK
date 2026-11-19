@@ -871,22 +871,29 @@ public class BorrowRequestService {
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                String requestStatus = lockRequestStatusForBorrower(connection, borrowerId, requestId);
-                if (!"RELEASED".equals(requestStatus)) {
-                    throw new IllegalArgumentException("Equipment can only be received after it has been released.");
+                ApprovalState state = lockApprovalState(connection, requestId, borrowerId);
+                if (!RequestStatus.isFinalApprovalGranted(
+                        state.status, state.adminStatus, state.directorStatus)) {
+                    throw new IllegalArgumentException(
+                            "Equipment can only be received after final approval and release.");
                 }
                 List<GroupRow> groups = lockBorrowerGroups(connection, requestId);
                 if (groups.isEmpty()) {
                     throw new IllegalStateException("No equipment groups found for this request.");
                 }
                 boolean hasReleased = false;
-                for (GroupRow g : groups) {
-                    if ("RELEASED".equals(g.status)) hasReleased = true;
+                for (GroupRow group : groups) {
+                    if ("RELEASED".equals(group.status)) {
+                        hasReleased = true;
+                        break;
+                    }
                 }
                 if (!hasReleased) {
-                    throw new IllegalArgumentException("No released equipment is waiting for your confirmation.");
+                    throw new IllegalArgumentException(
+                            "No released equipment is waiting for your confirmation.");
                 }
-                // Mark all RELEASED groups as RECEIVED (per-department)
+                // Mark every released department group as received, with the borrower
+                // and timestamp kept on the group for Transaction History.
                 try (PreparedStatement ps = connection.prepareStatement(
                         "UPDATE request_groups SET status='RECEIVED', received_by=?, received_at=CURRENT_TIMESTAMP "
                                 + "WHERE request_id=? AND status='RELEASED'")) {
@@ -894,24 +901,29 @@ public class BorrowRequestService {
                     ps.setLong(2, requestId);
                     ps.executeUpdate();
                 }
-                // Do not change overall request status here; staff still inspects/returns per department
-                recordHistory(connection, requestId, null, borrowerId, "BORROWER_RECEIVED", requestStatus, requestStatus, null);
+                // Do not change the stored request status here; staff still inspects and
+                // returns each department's equipment independently.
+                recordHistory(connection, requestId, null, borrowerId, "BORROWER_RECEIVED",
+                        state.status, state.status, null);
+                String message = "Borrower confirmed receiving released equipment for request "
+                        + requestId + ".";
                 notifyRole(connection, "ICT_STAFF", requestId, "Borrower confirmed receipt",
-                        "Borrower confirmed receiving released equipment for request " + requestId + ".", null, "BORROWER_RECEIVED");
+                        message, null, "BORROWER_RECEIVED");
                 notifyRole(connection, "FACILITY_STAFF", requestId, "Borrower confirmed receipt",
-                        "Borrower confirmed receiving released equipment for request " + requestId + ".", null, "BORROWER_RECEIVED");
+                        message, null, "BORROWER_RECEIVED");
                 connection.commit();
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 connection.rollback();
-                throw e;
+                throw exception;
             }
         }
     }
 
     /**
-     * Releases or receives the actor's department equipment. Only the department's
-     * own approval is checked, so ICT and Facility release independently: one
-     * department's decline or release never blocks the other.
+     * Releases or inspects the return of the actor's department equipment. The final
+     * decision is checked from the stored Facility Admin and Campus Director approvals,
+     * so a request can never be released before both required approvals are recorded.
+     * Each department is still processed independently.
      */
     private void updateStaffTransaction(
             String role, long actorId, long requestId, boolean release,
@@ -921,25 +933,24 @@ public class BorrowRequestService {
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                String requestStatus = lockRequestStatus(connection, requestId);
+                ApprovalState state = lockApprovalState(connection, requestId, null);
+                String requestStatus = state.status;
                 List<GroupRow> groups = lockRoleGroups(connection, requestId, normalizedRole);
                 if (groups.isEmpty()) {
                     throw new SecurityException(
                             "This request has no equipment assigned to your department.");
                 }
-                boolean finalApproved = "APPROVED".equals(requestStatus)
-                        || "RELEASED".equals(requestStatus);
+                boolean finalApproved = RequestStatus.isFinalApprovalGranted(
+                        state.status, state.adminStatus, state.directorStatus);
                 GroupRow target;
                 String issues = null;
                 if (release) {
-                    target = firstDueWithStatus(groups, "ASSIGNED");
-                    if (target == null) {
-                        String future = futureScheduleReason(groups, "ASSIGNED");
-                        throw new IllegalArgumentException(
-                                future == null ? releaseBlockedReason(groups) : future);
-                    }
                     if (!finalApproved) {
                         throw new IllegalArgumentException(stageBlockedReason(requestStatus));
+                    }
+                    target = firstWithStatus(groups, "ASSIGNED");
+                    if (target == null) {
+                        throw new IllegalArgumentException(releaseBlockedReason(groups));
                     }
                     recordReleaseConditions(connection, target.groupId, inspections);
                     try (PreparedStatement statement = connection.prepareStatement("""
@@ -955,13 +966,13 @@ public class BorrowRequestService {
                         }
                     }
                 } else {
-                    target = firstDueWithStatus(groups, "RECEIVED");
-                    if (target == null || !finalApproved) {
-                        String future = futureScheduleReason(groups, "RECEIVED");
+                    if (!finalApproved) {
+                        throw new IllegalArgumentException(stageBlockedReason(requestStatus));
+                    }
+                    target = firstWithStatus(groups, "RECEIVED");
+                    if (target == null) {
                         throw new IllegalArgumentException(
-                                future == null
-                                        ? "Borrower must confirm receipt (Receive) before you can inspect/record return."
-                                        : future);
+                                "Borrower must confirm receipt (Receive) before you can inspect/record return.");
                     }
                     issues = recordReturnInspection(
                             connection, requestId, target.groupId, inspections);
@@ -1166,6 +1177,19 @@ public class BorrowRequestService {
         }
     }
 
+    /** Request stage plus the two stored review decisions used to gate release. */
+    private static final class ApprovalState {
+        private final String status;
+        private final String adminStatus;
+        private final String directorStatus;
+
+        private ApprovalState(String status, String adminStatus, String directorStatus) {
+            this.status = status;
+            this.adminStatus = adminStatus;
+            this.directorStatus = directorStatus;
+        }
+    }
+
     /** Locks the request row so concurrent department actions are serialized. */
     private String lockRequestStatus(Connection connection, long requestId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
@@ -1181,16 +1205,28 @@ public class BorrowRequestService {
         }
     }
 
-    private String lockRequestStatusForBorrower(Connection connection, long borrowerId, long requestId) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT status FROM borrow_requests WHERE request_id=? AND borrower_id=? AND deleted_at IS NULL FOR UPDATE")) {
+    /** Locks a request and returns its stage together with both review decisions. */
+    private ApprovalState lockApprovalState(
+            Connection connection, long requestId, Long borrowerId) throws SQLException {
+        String sql = "SELECT status, admin_status, director_status FROM borrow_requests "
+                + "WHERE request_id = ? AND deleted_at IS NULL";
+        if (borrowerId != null) {
+            sql += " AND borrower_id = ?";
+        }
+        sql += " FOR UPDATE";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, requestId);
-            statement.setLong(2, borrowerId);
+            if (borrowerId != null) {
+                statement.setLong(2, borrowerId);
+            }
             try (ResultSet result = statement.executeQuery()) {
                 if (!result.next()) {
                     throw new IllegalArgumentException("Request was not found.");
                 }
-                return result.getString(1);
+                return new ApprovalState(
+                        result.getString("status"),
+                        result.getString("admin_status"),
+                        result.getString("director_status"));
             }
         }
     }
@@ -1323,30 +1359,14 @@ public class BorrowRequestService {
         return pending;
     }
 
-    /** A group can only be handled once its own scheduled date has arrived (for release/return). */
-    private static boolean isScheduleDue(GroupRow group) {
-        return group.eventDate == null || !group.eventDate.isAfter(LocalDate.now(MANILA));
-    }
-
-    private static GroupRow firstDueWithStatus(List<GroupRow> groups, String status) {
+    /** First group in the given state, ordered by the query's schedule/ID sort. */
+    private static GroupRow firstWithStatus(List<GroupRow> groups, String status) {
         for (GroupRow group : groups) {
-            if (status.equals(group.status) && isScheduleDue(group)) {
+            if (status.equals(group.status)) {
                 return group;
             }
         }
         return null;
-    }
-
-    private static String futureScheduleReason(List<GroupRow> groups, String status) {
-        LocalDate next = null;
-        for (GroupRow group : groups) {
-            if (status.equals(group.status) && !isScheduleDue(group)
-                    && (next == null || (group.eventDate != null && group.eventDate.isBefore(next)))) {
-                next = group.eventDate;
-            }
-        }
-        return next == null ? null
-                : "The next schedule is on " + next + ". It cannot be processed until that date.";
     }
 
     private static String releaseBlockedReason(List<GroupRow> groups) {
@@ -1372,8 +1392,9 @@ public class BorrowRequestService {
     private static String stageBlockedReason(String requestStatus) {
         return switch (requestStatus) {
             case "PENDING_STAFF", "NEEDS_ACTION", "PENDING_ADMIN" ->
-                    "The request is still waiting for administrative approval.";
-            case "PENDING_DIRECTOR" -> "The request is still waiting for final director approval.";
+                    "The request is still waiting for Facility Admin approval.";
+            case "PENDING_DIRECTOR" ->
+                    "The request is still waiting for Campus Director approval.";
             case "REJECTED" -> "This request was declined and cannot be released.";
             case "CANCELLED" -> "This request was cancelled.";
             default -> "Only approved equipment can be released.";

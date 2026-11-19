@@ -17,6 +17,7 @@ public class Notification {
             "equipment returned",
             "released equipment",
             "returned equipment",
+            "borrower confirmed receipt",
             "release not processed",
             "transaction completed",
             "damaged or missing equipment",

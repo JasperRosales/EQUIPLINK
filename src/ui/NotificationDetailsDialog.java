@@ -164,6 +164,7 @@ public class NotificationDetailsDialog extends JDialog {
             case "DEPARTMENT_APPROVED": return "Department approved its equipment";
             case "DEPARTMENT_DECLINED": return "Department declined its equipment";
             case "EQUIPMENT_RELEASED": return "Equipment released";
+            case "BORROWER_RECEIVED": return "Borrower confirmed receipt";
             case "EQUIPMENT_RETURNED": return "Equipment returned";
             case "PENDING_ADMIN": return "Moved to administrative review";
             case "ADMIN_APPROVED": return "Approved by administrator";

@@ -30,6 +30,9 @@ import java.util.concurrent.ExecutionException;
 
 public class RequestQueuePanel extends JPanel implements Refreshable {
 
+    private static final DateTimeFormatter ACTION_STAMP =
+            DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a");
+
     public enum Mode {
         STAFF_QUEUE,
         ADMIN_REVIEW,
@@ -449,6 +452,16 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
             details.add(Box.createVerticalStrut(4));
             details.add(approval);
         }
+        if (mode == Mode.SCHEDULE_ASSIGNMENT || mode == Mode.TRANSACTION_HISTORY) {
+            String handover = handoverLine(request);
+            if (!handover.isEmpty()) {
+                JLabel actionsLine = new JLabel(handover);
+                actionsLine.setFont(AppTheme.regular(10));
+                actionsLine.setForeground(AppTheme.muted());
+                details.add(Box.createVerticalStrut(4));
+                details.add(actionsLine);
+            }
+        }
         String remarks = departmentRemarks(request);
         if (!remarks.isEmpty()) {
             JLabel remarksLine = new JLabel("<html>" + remarks + "</html>");
@@ -493,12 +506,11 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
             actions.add(approve);
             actions.add(reject);
         } else if (mode == Mode.SCHEDULE_ASSIGNMENT || mode == Mode.TRANSACTION_HISTORY) {
-            boolean finalApproved = RequestStatus.isFinalApprovalGranted(request);
-            if (mode == Mode.SCHEDULE_ASSIGNMENT && finalApproved
-                    && hasOwnGroup(request, "ASSIGNED")
-                    && hasProcessableGroup(request, "ASSIGNED", false)) {
+            if (canRelease(request)) {
                 PrimaryButton release = new PrimaryButton(
                         RequestStatus.departmentLabel(actor.getRole()) + " release");
+                release.setToolTipText(
+                        "Available after Facility Admin and Campus Director approval");
                 release.addActionListener(event -> updateTransaction(request, true, release));
                 actions.add(release);
             }
@@ -506,7 +518,7 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
                 PrimaryButton returned = new PrimaryButton(
                         "Inspect return", PrimaryButton.Style.SECONDARY);
                 returned.setToolTipText(
-                        "Inspect the returned equipment after the borrower confirms receipt");
+                        "Available only after the borrower confirms receipt");
                 returned.addActionListener(event -> updateTransaction(request, false, returned));
                 actions.add(returned);
             }
@@ -521,6 +533,39 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         }
     }
 
+    /** Release, receipt, and return actors/timestamps shown on transaction cards. */
+    private String handoverLine(BorrowRequest request) {
+        StringBuilder line = new StringBuilder();
+        for (DepartmentStatus department : request.getDepartments()) {
+            if (isStaffActor(actor)
+                    && !actor.getRole().equalsIgnoreCase(department.getCustodianRole())) {
+                continue;
+            }
+            String label = RequestStatus.departmentLabel(department.getCustodianRole());
+            appendAction(line, label, "released", department.getReleasedByName(),
+                    department.getReleasedAt());
+            appendAction(line, label, "received", department.getReceivedByName(),
+                    department.getReceivedAt());
+            appendAction(line, label, "inspected", department.getInspectedByName(),
+                    department.getInspectedAt());
+        }
+        return line.toString();
+    }
+
+    private static void appendAction(
+            StringBuilder line, String department, String action,
+            String actorName, java.time.LocalDateTime at) {
+        if (at == null) {
+            return;
+        }
+        if (line.length() > 0) {
+            line.append("  ·  ");
+        }
+        line.append(department).append(' ').append(action).append(' ')
+                .append(at.format(ACTION_STAMP))
+                .append(" by ").append(actorName == null ? "staff" : actorName);
+    }
+
     private boolean hasOwnGroup(BorrowRequest request, String status) {
         for (DepartmentStatus department : request.getDepartments()) {
             if (actor.getRole().equalsIgnoreCase(department.getCustodianRole())
@@ -531,31 +576,18 @@ public class RequestQueuePanel extends JPanel implements Refreshable {
         return false;
     }
 
+    /** Release requires both review approvals and an assigned group for this department. */
+    private boolean canRelease(BorrowRequest request) {
+        return isStaffActor(actor)
+                && RequestStatus.isFinalApprovalGranted(request)
+                && hasOwnGroup(request, "ASSIGNED");
+    }
+
     /** Staff may inspect only once the borrower has confirmed receipt (RECEIVED). */
     private boolean canInspectReturn(BorrowRequest request) {
         return isStaffActor(actor)
-                && hasOwnGroup(request, "RECEIVED")
-                && hasProcessableGroup(request, "RECEIVED", true);
-    }
-
-    /** True when one of this department's groups has reached its scheduled date. */
-    private boolean hasProcessableGroup(BorrowRequest request, String status, boolean useEnd) {
-        if (scopeRole == null) {
-            return false;
-        }
-        for (DepartmentStatus department : request.getDepartments()) {
-            if (!scopeRole.equalsIgnoreCase(department.getCustodianRole())
-                    || !status.equals(department.getStatus())) {
-                continue;
-            }
-            java.time.LocalDateTime boundary = useEnd
-                    ? department.getScheduleEnd() : department.getScheduleStart();
-            if (boundary == null
-                    || !boundary.toLocalDate().isAfter(src.ui.components.DateFilter.today())) {
-                return true;
-            }
-        }
-        return false;
+                && RequestStatus.isFinalApprovalGranted(request)
+                && hasOwnGroup(request, "RECEIVED");
     }
 
     private boolean isIctAdmin() {

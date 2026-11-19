@@ -101,13 +101,29 @@ public final class RequestStatus {
         return PENDING;
     }
 
-    /** True only after the Campus Director's approval (or a completed workflow). */
+    /** True only after both Facility Admin and Campus Director approvals. */
     public static boolean isFinalApprovalGranted(BorrowRequest request) {
         if (request == null) return false;
-        String stage = request.getStatus();
-        return "APPROVED".equals(stage) || "RELEASED".equals(stage)
-                || "COMPLETED".equals(stage)
-                || "APPROVED".equalsIgnoreCase(request.getDirectorStatus());
+        return isFinalApprovalGranted(
+                request.getStatus(), request.getAdminStatus(), request.getDirectorStatus());
+    }
+
+    /**
+     * Final approval requires both review stages. The {@code APPROVED} stage is only
+     * reachable after both reviews, so legacy rows with no stored decisions still
+     * qualify; once a stored decision exists, both must be APPROVED.
+     */
+    public static boolean isFinalApprovalGranted(
+            String stage, String adminStatus, String directorStatus) {
+        if (stage == null) return false;
+        if ("RELEASED".equals(stage) || "COMPLETED".equals(stage)) return true;
+        if ("APPROVED".equals(stage)) {
+            if (adminStatus == null && directorStatus == null) return true;
+            return "APPROVED".equalsIgnoreCase(adminStatus)
+                    && "APPROVED".equalsIgnoreCase(directorStatus);
+        }
+        return "APPROVED".equalsIgnoreCase(adminStatus)
+                && "APPROVED".equalsIgnoreCase(directorStatus);
     }
 
     /** Groups still taking part in the request, optionally limited to one department. */

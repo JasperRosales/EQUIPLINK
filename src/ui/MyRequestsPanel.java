@@ -389,9 +389,9 @@ public class MyRequestsPanel extends JPanel implements Refreshable {
 
     private boolean canReceive(BorrowRequest request) {
         if (request == null) return false;
-        if (!"RELEASED".equalsIgnoreCase(request.getStatus())) return false;
-        for (src.model.DepartmentStatus ds : request.getDepartments()) {
-            if ("RELEASED".equalsIgnoreCase(ds.getStatus())) return true;
+        if (!src.model.RequestStatus.isFinalApprovalGranted(request)) return false;
+        for (src.model.DepartmentStatus department : request.getDepartments()) {
+            if ("RELEASED".equalsIgnoreCase(department.getStatus())) return true;
         }
         return false;
     }
