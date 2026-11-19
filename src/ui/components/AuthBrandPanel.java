@@ -23,8 +23,7 @@ public class AuthBrandPanel extends JPanel {
         JPanel logo = new JPanel();
         logo.setOpaque(false);
         logo.setLayout(new BoxLayout(logo, BoxLayout.X_AXIS));
-        JLabel badge = new Avatar("EL", AppTheme.primary(), 10);
-        badge.setFont(AppTheme.semibold(13));
+        JLabel badge = new JLabel(src.ui.BrandLogo.badge(38, AppTheme.LIGHT_BG));
         badge.setPreferredSize(new java.awt.Dimension(38, 38));
         badge.setMaximumSize(new java.awt.Dimension(38, 38));
         JLabel brand = new JLabel("EquipLink");

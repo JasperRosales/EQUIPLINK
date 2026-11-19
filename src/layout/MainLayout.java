@@ -42,41 +42,7 @@ import java.awt.GridLayout;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class MainLayout extends JPanel {
-
-        private final User user;
-        private final AuthController authController;
-        private final BorrowRequestController requestController;
-        private final EquipmentController equipmentController;
-        private final NotificationController notificationController;
-        private final JPanel sidebar;
-        private JPanel navigationPanel;
-        private final JPanel header;
-        private final JPanel mainPanel;
-        private final JPanel pageContainer;
-        private final JLabel pageTitle;
-        private final JLabel pageDescription;
-        private PrimaryButton notificationButton;
-        private JLabel headerUserName;
-        private JLabel headerUserRole;
-        private final Map<String, NavigationButton> navigationButtons = new LinkedHashMap<>();
-        private boolean notificationsEnabled = true;
-        private Runnable logoutAction;
-        private String currentPage = "Dashboard";
-        private javax.swing.Timer reminderTimer;
-        /** Polls for request/notification changes so every dashboard stays in sync. */
-        private javax.swing.Timer liveSyncTimer;
-        private javax.swing.JComponent currentContent;
-        private String pageFilter;
-        private String lastChangeToken;
-        private boolean syncing;
-        private long lastOverdueSweep;
-        private long lastReload = System.currentTimeMillis();
-        private java.time.LocalDate lastSyncDate =
-                java.time.LocalDate.now(java.time.ZoneId.of("Asia/Manila"));
-        private static final int LIVE_SYNC_MS = 8000;
-        private static final long OVERDUE_SWEEP_MS = 60_000L;
-        private static final long TIME_REFRESH_MS = 5 * 60_000L;
+public class MainLayout extends MainLayoutPart2 {
 
         public MainLayout(User user, AuthController authController) {
                 this(user, authController,
@@ -116,7 +82,7 @@ public class MainLayout extends JPanel {
                                 new NotificationController(new NotificationService()));
         }
 
-        private MainLayout(
+        MainLayout(
                         String systemName,
                         String userName,
                         String userRole,
@@ -178,7 +144,7 @@ public class MainLayout extends JPanel {
                 startLiveSync();
         }
 
-        private JPanel createSidebarTop(String systemName, String[] navigationItems) {
+        JPanel createSidebarTop(String systemName, String[] navigationItems) {
                 JPanel top = new JPanel();
                 top.setBackground(AppTheme.sidebar());
                 top.setBorder(new EmptyBorder(22, 14, 15, 14));
@@ -189,9 +155,8 @@ public class MainLayout extends JPanel {
                 brand.setAlignmentX(LEFT_ALIGNMENT);
                 brand.setBorder(new EmptyBorder(0, 6, 0, 0));
                 brand.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
-                JLabel logo = new src.ui.components.Avatar("EL", AppTheme.primary(), 10);
+                JLabel logo = new JLabel(src.ui.BrandLogo.badge(36, AppTheme.LIGHT_BG));
                 logo.setPreferredSize(new Dimension(36, 36));
-                logo.setFont(AppTheme.semibold(12));
                 JPanel brandText = new JPanel(new java.awt.GridLayout(2, 1));
                 brandText.setOpaque(false);
                 JLabel name = new JLabel(systemName);
@@ -234,52 +199,7 @@ public class MainLayout extends JPanel {
                 return top;
         }
 
-        private JPanel createProfile(String name, String role) {
-                JPanel profile = new JPanel(new BorderLayout(10, 0));
-                profile.setBackground(AppTheme.sidebar());
-                profile.setBorder(javax.swing.BorderFactory.createCompoundBorder(
-                                javax.swing.BorderFactory.createMatteBorder(
-                                                1, 0, 0, 0, AppTheme.sidebarDivider()),
-                                new EmptyBorder(14, 18, 16, 16)));
-                JLabel initials = new src.ui.components.Avatar(
-                                initials(name), AppTheme.sidebarShadowLight(), 999);
-                initials.setFont(AppTheme.semibold(11));
-                initials.setPreferredSize(new Dimension(36, 36));
-
-                JPanel identity = new JPanel();
-                identity.setOpaque(false);
-                identity.setLayout(new BoxLayout(identity, BoxLayout.Y_AXIS));
-                JLabel profileName = new JLabel(name);
-                profileName.setFont(AppTheme.semibold(11.5f));
-                profileName.setForeground(Color.WHITE);
-                JLabel profileRole = new JLabel(role);
-                profileRole.setFont(AppTheme.regular(10.5f));
-                profileRole.setForeground(AppTheme.sidebarMuted());
-                identity.add(profileName);
-                identity.add(Box.createVerticalStrut(3));
-                identity.add(profileRole);
-                profile.add(initials, BorderLayout.WEST);
-                profile.add(identity, BorderLayout.CENTER);
-
-                JButton logout = new JButton("Log out");
-                logout.setToolTipText("Log out");
-                logout.setFont(AppTheme.semibold(10.5f));
-                logout.setForeground(AppTheme.sidebarText());
-                logout.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-                logout.setIconTextGap(4);
-                logout.setBorder(new EmptyBorder(3, 0, 3, 0));
-                logout.setContentAreaFilled(false);
-                logout.setFocusPainted(false);
-                logout.addActionListener(event -> {
-                        if (logoutAction != null) {
-                                logoutAction.run();
-                        }
-                });
-                profile.add(logout, BorderLayout.EAST);
-                return profile;
-        }
-
-        private JPanel createHeaderActions(String name, String role) {
+        JPanel createHeaderActions(String name, String role) {
                 JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 2));
                 actions.setOpaque(false);
                 notificationButton = new PrimaryButton("Notifications",
@@ -306,440 +226,7 @@ public class MainLayout extends JPanel {
                 return actions;
         }
 
-        public static String[] navigationFor(String role) {
-                switch (normalizeRole(role)) {
-                        case "BORROWER":
-                                return new String[] {
-                                                "Dashboard", "Available Equipment", "Request Equipment", "My Requests",
-                                                "Borrowing Request", "Notifications", "Settings"
-                                };
-                        case "ICT_STAFF":
-                                return new String[] {
-                                                "Dashboard", "Inventory", "Requests",
-                                                "Schedule & Assignment", "Transaction History",
-                                                "Password Requests", "User Management",
-                                                "Venue Management",
-                                                "Notifications", "Settings"
-                                };
-                        case "FACILITY_STAFF":
-                                return new String[] {
-                                                "Dashboard", "Inventory", "Requests",
-                                                "Schedule & Assignment", "Transaction History",
-                                                "Notifications", "Settings"
-                                };
-                        case "DIRECTOR":
-                                return new String[] {
-                                                "Dashboard", "Request Approval", "Transaction History",
-                                                "Notifications", "Settings"
-                                };
-                        case "ADMIN":
-                                return new String[] {
-                                                "Dashboard", "Inventory", "Borrowing Requests",
-                                                "All Requests", "Notifications", "Settings"
-                                };
-                        default:
-                                return new String[] {
-                                                "Dashboard", "Inventory", "Borrowing Requests",
-                                                "All Requests", "Password Requests", "Notifications", "Settings"
-                                };
-                }
-        }
-
-        private static String normalizeRole(String role) {
-                return role == null ? "" : role.trim().toUpperCase().replace(' ', '_');
-        }
-
-        private static String displayRole(String role) {
-                switch (normalizeRole(role)) {
-                        case "BORROWER":
-                                return "Borrower";
-                        case "ICT_STAFF":
-                                return "System Admin";
-                        case "FACILITY_STAFF":
-                                return "Facility Staff";
-                        case "DIRECTOR":
-                                return "Campus Director";
-                        case "ADMIN":
-                                return "Facility Admin";
-                        default:
-                                return role == null || role.isBlank() ? "User" : role;
-                }
-        }
-
-        private String initials(String name) {
-                if (name == null || name.isBlank()) {
-                        return "EL";
-                }
-                String[] parts = name.trim().split("\\s+");
-                return parts.length == 1
-                                ? parts[0].substring(0, 1).toUpperCase()
-                                : (parts[0].substring(0, 1) + parts[parts.length - 1].substring(0, 1))
-                                                .toUpperCase();
-        }
-
-        /**
-         * Opens a page. "Page::Filter" (e.g. "All Requests::Declined") also preselects
-         * a status filter, so dashboard counters open the matching filtered list.
-         */
-        public void showPage(String target) {
-                currentPage = target;
-                String item = target;
-                pageFilter = null;
-                int split = target.indexOf("::");
-                if (split >= 0) {
-                        item = target.substring(0, split);
-                        pageFilter = target.substring(split + 2);
-                }
-                String title = pageTitleFor(item);
-                pageTitle.setText(title);
-                pageDescription.setText(pageDescriptionFor(item));
-                setActiveNavigation(navigationItemFor(item));
-                pageContainer.removeAll();
-                currentContent = createPage(item);
-                lastReload = System.currentTimeMillis();
-                pageContainer.add(new src.ui.components.FadeInPanel(
-                                UiSupport.scroll(currentContent)), BorderLayout.CENTER);
-                pageContainer.revalidate();
-                pageContainer.repaint();
-        }
-
-        private javax.swing.JComponent createPage(String item) {
-                if (user == null) {
-                        return infoPage(item, "Sign in to access your EquipLink workspace.");
-                }
-                switch (item) {
-                        case "Dashboard":
-                                return new DashboardPanel(
-                                                user, requestController, equipmentController, this::showPage);
-                        case "Request Equipment":
-                                if (isBorrower()) {
-                                        return requestForm(null);
-                                }
-                                return infoPage(item, "Equipment requests are available to borrower accounts.");
-                        case "My Requests":
-                                if (isBorrower()) {
-                                        return new MyRequestsPanel(
-                                                        user.getUserId(),
-                                                        requestController,
-                                                        this::editRequest,
-                                                        this::refreshCurrentPage,
-                                                        pageFilter);
-                                }
-                                return infoPage(item, "This page is available to borrower accounts.");
-                        case "Pending Requests":
-                                if (isBorrower()) {
-                                        return new MyRequestsPanel(
-                                                        user.getUserId(), requestController,
-                                                        this::editRequest, this::refreshCurrentPage,
-                                                        "PENDING");
-                                }
-                                return infoPage(item, "This page is available to borrower accounts.");
-                        case "Borrowed Requests":
-                                if (isBorrower()) {
-                                        return new MyRequestsPanel(
-                                                        user.getUserId(), requestController,
-                                                        this::editRequest, this::refreshCurrentPage,
-                                                        "BORROWED");
-                                }
-                                return infoPage(item, "This page is available to borrower accounts.");
-                        case "Borrowing Request":
-                                if (isBorrower()) {
-                                        return new BorrowingHistoryPanel(user.getUserId(), requestController);
-                                }
-                                return infoPage(item, "Review borrowing history and activity.");
-                        case "Settings":
-                                return new SettingsPanel(
-                                                user, authController, notificationsEnabled,
-                                                this::refreshCurrentPage,
-                                                this::saveNotificationPreference);
-                        case "Notifications":
-                                return new NotificationsPanel(
-                                                user, notificationController, requestController,
-                                                this::refreshNotificationBadge);
-                        case "Available Equipment":
-                                return new EquipmentInventoryPanel(
-                                                user, equipmentController, this::requestItems);
-                        case "Inventory":
-                        case "Equipment":
-                                return new EquipmentInventoryPanel(user, equipmentController);
-                        case "Requests":
-                                if (isStaff()) {
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.STAFF_QUEUE);
-                                }
-                                return infoPage(item, "This page is available to equipment staff.");
-                        case "Schedule & Assignment":
-                                if (isStaff()) {
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.SCHEDULE_ASSIGNMENT);
-                                }
-                                return infoPage(item, "This page is available to equipment staff.");
-                        case "Transaction History":
-                                if (isStaff() || isDirectorRole() || isAdminRole()) {
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.TRANSACTION_HISTORY,
-                                                        pageFilter);
-                                }
-                                return infoPage(item, "This page is available to staff and administrators.");
-                        case "Borrowing Requests":
-                                if ("ADMIN".equals(normalizeRole(user.getRole()))) {
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.ADMIN_REVIEW);
-                                }
-                                return infoPage(item, "This page is available to facility administrators.");
-                        case "Request Approval":
-                                if ("DIRECTOR".equals(normalizeRole(user.getRole()))) {
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.DIRECTOR_REVIEW);
-                                }
-                                return infoPage(item, "This page is available to the campus director.");
-                        case "All Requests":
-                                if (isBorrower()) {
-                                        return new MyRequestsPanel(
-                                                        user.getUserId(), requestController,
-                                                        this::editRequest, this::refreshCurrentPage,
-                                                        pageFilter);
-                                }
-                                if (isStaff() || isDirectorRole()) {
-                                        // Facility Staff no longer has a separate All Requests
-                                        // page, and the Director's page is Transaction History.
-                                        return new RequestQueuePanel(
-                                                        user, requestController,
-                                                        RequestQueuePanel.Mode.TRANSACTION_HISTORY,
-                                                        pageFilter);
-                                }
-                                return new RequestQueuePanel(
-                                                user, requestController,
-                                                RequestQueuePanel.Mode.ALL_REQUESTS, pageFilter);
-                        case "Password Requests":
-                                String role = normalizeRole(user.getRole());
-                                if ("ICT_STAFF".equals(role)) {
-                                        return new PasswordResetRequestsPanel(user, authController);
-                                }
-                                return infoPage(item, "This page is available to ICT system administrators.");
-                        case "User Management":
-                                if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
-                                        return new UserManagementPanel(user, authController);
-                                }
-                                return infoPage(item, "This page is available to ICT system administrators.");
-                        case "Venue Management":
-                                if ("ICT_STAFF".equals(normalizeRole(user.getRole()))) {
-                                        return new RoomManagementPanel(user);
-                                }
-                                return infoPage(item, "This page is available to ICT system administrators.");
-                        default:
-                                return infoPage(item,
-                                                "This workspace is ready for " + item.toLowerCase()
-                                                                + " tools and records.");
-                }
-        }
-
-        private EquipmentRequestPanel requestForm(BorrowRequest request) {
-                return requestForm(request, java.util.List.of());
-        }
-
-        private EquipmentRequestPanel requestForm(
-                        BorrowRequest request, java.util.List<src.model.EquipmentRequestItem> items) {
-                return new EquipmentRequestPanel(
-                                user, requestController, equipmentController, request,
-                                () -> showPage("My Requests"), items);
-        }
-
-        /** Opens the request form prefilled with items picked from Available Equipment. */
-        private void requestItems(java.util.List<src.model.EquipmentRequestItem> items) {
-                currentPage = "Request Equipment";
-                pageTitle.setText("Request Equipment");
-                pageDescription.setText(items.size() + " item(s) added from Available Equipment");
-                setActiveNavigation("Request Equipment");
-                pageContainer.removeAll();
-                pageContainer.add(new src.ui.components.FadeInPanel(
-                                UiSupport.scroll(requestForm(null, items))), BorderLayout.CENTER);
-                pageContainer.revalidate();
-                pageContainer.repaint();
-        }
-
-        private void editRequest(BorrowRequest request) {
-                currentPage = "My Requests";
-                pageTitle.setText("Edit request");
-                pageDescription.setText("Update details for " + request.getRequestCode());
-                setActiveNavigation("My Requests");
-                pageContainer.removeAll();
-                pageContainer.add(new src.ui.components.FadeInPanel(
-                                UiSupport.scroll(requestForm(request))), BorderLayout.CENTER);
-                pageContainer.revalidate();
-                pageContainer.repaint();
-        }
-
-        private javax.swing.JComponent infoPage(String title, String detail) {
-                SurfacePanel panel = new SurfacePanel();
-                panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-                JLabel heading = new JLabel(title);
-                heading.setFont(AppTheme.semibold(16));
-                heading.setForeground(AppTheme.foreground());
-                JLabel description = new JLabel(detail);
-                description.setFont(AppTheme.regular(11));
-                description.setForeground(AppTheme.muted());
-                panel.add(heading);
-                panel.add(Box.createVerticalStrut(7));
-                panel.add(description);
-                return panel;
-        }
-
-        private String pageTitleFor(String item) {
-                if ("Borrowing Request".equals(item)) {
-                        return "Borrowing History";
-                }
-                if ("Pending Requests".equals(item) || "Borrowed Requests".equals(item)) {
-                        return "My Requests";
-                }
-                return item;
-        }
-
-        private String pageDescriptionFor(String item) {
-                switch (item) {
-                        case "Dashboard":
-                                return "Overview of your EquipLink activity";
-                        case "Request Equipment":
-                                return "Create a request using live campus inventory";
-                        case "Available Equipment":
-                                return "Browse items on hand and request several at once";
-                        case "Inventory":
-                                return "Live stock for your equipment group";
-                        case "My Requests":
-                                return "Track pending requests and equipment you have borrowed";
-                        case "Pending Requests":
-                                return "Requests waiting for review or action";
-                        case "Borrowed Requests":
-                                return "Equipment currently released to you";
-                        case "Borrowing Request":
-                                return "Your completed, cancelled, and declined requests";
-                        case "Transaction History":
-                                return "Pending, approved, declined, overdue, and completed records";
-                        case "Settings":
-                                return "Appearance, notifications, and account security";
-                        case "Notifications":
-                                return "Stay up to date on request activity";
-                        default:
-                                return "Manage " + item.toLowerCase() + " in EquipLink";
-                }
-        }
-
-        private boolean isBorrower() {
-                return "BORROWER".equals(normalizeRole(user.getRole()));
-        }
-
-        private boolean isStaff() {
-                String role = normalizeRole(user.getRole());
-                return "ICT_STAFF".equals(role) || "FACILITY_STAFF".equals(role);
-        }
-
-        private boolean isDirectorRole() {
-                return "DIRECTOR".equals(normalizeRole(user.getRole()));
-        }
-
-        private boolean isAdminRole() {
-                return "ADMIN".equals(normalizeRole(user.getRole()));
-        }
-
-        private String navigationItemFor(String page) {
-                if (user != null && (isStaff() || isDirectorRole())
-                        && "All Requests".equals(page)) {
-                        return "Transaction History";
-                }
-                if (user != null && isBorrower() && "All Requests".equals(page)) {
-                        return "My Requests";
-                }
-                if ("Pending Requests".equals(page) || "Borrowed Requests".equals(page)) {
-                        return "My Requests";
-                }
-                return page;
-        }
-
-        private void refreshCurrentPage() {
-                applyTheme();
-                showPage(currentPage);
-        }
-
-        private void saveNotificationPreference(boolean enabled) {
-                if (user != null && authController != null) {
-                        try {
-                                authController.updateNotificationPreference(user.getUserId(), enabled);
-                        } catch (Exception exception) {
-                                throw new RuntimeException(
-                                        "Could not save the notification preference.", exception);
-                        }
-                        user.setNotificationsEnabled(enabled);
-                }
-                notificationsEnabled = enabled;
-        }
-
-        private void applyTheme() {
-                Color background = AppTheme.background();
-                setBackground(background);
-                sidebar.setBackground(AppTheme.sidebar());
-                sidebar.setBorder(null);
-                mainPanel.setBackground(background);
-                pageContainer.setBackground(background);
-                header.setBackground(background);
-                header.setBorder(javax.swing.BorderFactory.createCompoundBorder(
-                                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, AppTheme.border()),
-                                new EmptyBorder(14, 30, 14, 28)));
-                navigationPanel.setBackground(AppTheme.sidebar());
-                pageTitle.setForeground(AppTheme.foreground());
-                pageDescription.setForeground(AppTheme.muted());
-                if (notificationButton != null) {
-                        notificationButton.setForeground(AppTheme.foreground());
-                }
-                if (headerUserName != null) {
-                        headerUserName.setForeground(AppTheme.foreground());
-                }
-                if (headerUserRole != null) {
-                        headerUserRole.setForeground(AppTheme.muted());
-                }
-                javax.swing.SwingUtilities.updateComponentTreeUI(this);
-                revalidate();
-                repaint();
-        }
-
-        public void setPage(String title, String description, JPanel content) {
-                currentPage = title;
-                pageTitle.setText(title);
-                pageDescription.setText(description);
-                setActiveNavigation(navigationItemFor(title));
-                pageContainer.removeAll();
-                pageContainer.add(new src.ui.components.FadeInPanel(
-                                UiSupport.scroll(content)), BorderLayout.CENTER);
-                pageContainer.revalidate();
-                pageContainer.repaint();
-        }
-
-        public void setNavigationAction(String item, Runnable action) {
-                NavigationButton button = navigationButtons.get(item);
-                if (button != null) {
-                        button.addActionListener(event -> action.run());
-                }
-        }
-
-        public void setActiveNavigation(String activeItem) {
-                for (Map.Entry<String, NavigationButton> entry : navigationButtons.entrySet()) {
-                        entry.getValue().setActive(entry.getKey().equals(activeItem));
-                }
-        }
-
-        public void setLogoutAction(Runnable logoutAction) {
-                this.logoutAction = logoutAction;
-        }
-
-        public JPanel getPageContainer() {
-                return pageContainer;
-        }
-
-        private void startLiveSync() {
+        void startLiveSync() {
                 if (user == null || notificationController == null) {
                         return;
                 }
@@ -747,91 +234,6 @@ public class MainLayout extends JPanel {
                 liveSyncTimer = new javax.swing.Timer(LIVE_SYNC_MS, event -> pollForChanges());
                 liveSyncTimer.setRepeats(true);
                 liveSyncTimer.start();
-        }
-
-        /** Reloads the visible page in place when requests or notifications changed. */
-        private void pollForChanges() {
-                if (syncing || !isShowing()) {
-                        return;
-                }
-                syncing = true;
-                boolean sweep = System.currentTimeMillis() - lastOverdueSweep > OVERDUE_SWEEP_MS;
-                new javax.swing.SwingWorker<Object[], Void>() {
-                        @Override
-                        protected Object[] doInBackground() throws Exception {
-                                if (sweep) {
-                                        try {
-                                                notificationController.runOverdueSweep();
-                                        } catch (Exception ignored) {
-                                                // The sweep is retried on the next cycle.
-                                        }
-                                }
-                                return new Object[] {
-                                                notificationController.changeToken(user.getUserId()),
-                                                notificationController.countUnread(user.getUserId())
-                                };
-                        }
-
-                        @Override
-                        protected void done() {
-                                syncing = false;
-                                if (sweep) {
-                                        lastOverdueSweep = System.currentTimeMillis();
-                                }
-                                try {
-                                        Object[] result = get();
-                                        String token = (String) result[0];
-                                        updateNotificationButton((Integer) result[1]);
-                                        boolean changed = lastChangeToken != null
-                                                        && !lastChangeToken.equals(token);
-                                        boolean stale = System.currentTimeMillis() - lastReload
-                                                        > TIME_REFRESH_MS;
-                                        java.time.LocalDate today = java.time.LocalDate.now(
-                                                java.time.ZoneId.of("Asia/Manila"));
-                                        boolean newDay = !today.equals(lastSyncDate);
-                                        lastSyncDate = today;
-                                        lastChangeToken = token;
-                                        if ((changed || stale || newDay)
-                                                        && currentContent instanceof src.ui.Refreshable) {
-                                                lastReload = System.currentTimeMillis();
-                                                ((src.ui.Refreshable) currentContent).reloadData();
-                                        }
-                                } catch (Exception ignored) {
-                                        // Database briefly unavailable; try again next cycle.
-                                }
-                        }
-                }.execute();
-        }
-
-        private void refreshNotificationBadge() {
-                if (user == null || notificationController == null) {
-                        return;
-                }
-                new javax.swing.SwingWorker<Integer, Void>() {
-                        @Override
-                        protected Integer doInBackground() throws Exception {
-                                return notificationController.countUnread(user.getUserId());
-                        }
-
-                        @Override
-                        protected void done() {
-                                try {
-                                        updateNotificationButton(get());
-                                } catch (Exception ignored) {
-                                }
-                        }
-                }.execute();
-        }
-
-        private void updateNotificationButton(int unread) {
-                if (notificationButton == null) {
-                        return;
-                }
-                notificationButton.setText(unread > 0
-                                ? "Notifications (" + (unread > 99 ? "99+" : unread) + ")"
-                                : "Notifications");
-                notificationButton.setToolTipText(unread > 0
-                                ? unread + " unread notification(s)" : "Open notifications");
         }
 
         @Override
@@ -853,7 +255,7 @@ public class MainLayout extends JPanel {
                 super.removeNotify();
         }
 
-        private boolean isApprover() {
+        boolean isApprover() {
                 String role = user == null ? "" : user.getRole();
                 String normalized = role == null ? "" : role.trim().toUpperCase().replace(' ', '_');
                 return "ICT_STAFF".equals(normalized)
@@ -862,7 +264,7 @@ public class MainLayout extends JPanel {
                                 || "DIRECTOR".equals(normalized);
         }
 
-        private void schedulePendingReminder() {
+        void schedulePendingReminder() {
                 if (!isApprover() || requestController == null || notificationController == null) {
                         return;
                 }
@@ -870,7 +272,7 @@ public class MainLayout extends JPanel {
                 scheduleFourPmReminder();
         }
 
-        private void scheduleFourPmReminder() {
+        void scheduleFourPmReminder() {
                 java.time.LocalDateTime now = java.time.LocalDateTime.now();
                 java.time.LocalDateTime next = now.with(java.time.LocalTime.of(16, 0));
                 if (!now.isBefore(next)) {
@@ -886,7 +288,7 @@ public class MainLayout extends JPanel {
                 reminderTimer.start();
         }
 
-        private void checkPendingReminder(boolean onLogin) {
+        void checkPendingReminder(boolean onLogin) {
                 if (!isApprover()) {
                         return;
                 }

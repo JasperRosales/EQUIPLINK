@@ -125,7 +125,7 @@ public class NotificationDetailsDialog extends JDialog {
         actions.add(close);
         content.add(actions, BorderLayout.SOUTH);
 
-        setContentPane(content);
+        setContentPane(src.ui.components.Motion.popIn(content));
         setSize(new Dimension(560, 460));
         setMinimumSize(new Dimension(480, 380));
         setLocationRelativeTo(owner);

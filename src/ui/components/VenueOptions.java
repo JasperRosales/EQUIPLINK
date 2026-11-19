@@ -13,9 +13,9 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Room choices for the venue picker. They are read from room.md at the project
- * root so non-technical users can add rooms without touching code. A built-in
- * copy keeps the picker usable when the app is launched outside the repository.
+ * Room choices for the venue picker, read from room.md so rooms can be added
+ * without touching code. Installed copies keep an editable room.md in the user's
+ * data folder, seeded from the room.md bundled in the app.
  */
 public final class VenueOptions {
 
@@ -157,31 +157,42 @@ public final class VenueOptions {
         }
     }
 
+    /**
+     * Where room.md lives. From source it is the project's room.md; an installed copy
+     * keeps it in the user's data folder (%LOCALAPPDATA%\EquipLink on Windows), which
+     * is writable and survives updates. That copy is seeded from the bundled room.md.
+     */
     private static Path roomFile() {
-        for (Path candidate : new Path[] {
-                Path.of("room.md"),
-                Path.of("..", "room.md") }) {
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
+        if (!src.util.AppInfo.isPackaged()) {
+            for (Path candidate : new Path[] {
+                    Path.of("room.md"),
+                    Path.of("..", "room.md") }) {
+                if (Files.isRegularFile(candidate)) {
+                    return candidate;
+                }
             }
         }
-        return Path.of("room.md");
+        return dataDirectory().resolve("room.md");
+    }
+
+    private static Path dataDirectory() {
+        String localAppData = System.getenv("LOCALAPPDATA");
+        if (localAppData != null && !localAppData.isBlank()) {
+            return Path.of(localAppData, "EquipLink");
+        }
+        return Path.of(System.getProperty("user.home"), ".equiplink");
     }
 
     private static List<String> loadFromDisk() {
-        for (Path candidate : new Path[] {
-                Path.of("room.md"),
-                Path.of("..", "room.md") }) {
-            if (!Files.isRegularFile(candidate)) {
-                continue;
-            }
+        Path file = roomFile();
+        if (Files.isRegularFile(file)) {
             try {
-                List<String> rooms = parse(Files.readAllLines(candidate, StandardCharsets.UTF_8));
+                List<String> rooms = parse(Files.readAllLines(file, StandardCharsets.UTF_8));
                 if (!rooms.isEmpty()) {
                     return rooms;
                 }
             } catch (IOException ignored) {
-                // Fall through to the next location or the built-in list.
+                // Fall back to the bundled list.
             }
         }
 

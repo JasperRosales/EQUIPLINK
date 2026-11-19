@@ -54,7 +54,7 @@ public class RegisterFrame extends JDialog {
                 "Create a borrower account to request equipment, follow its progress, and see your borrowing history."),
                 BorderLayout.WEST);
         root.add(createRegistrationForm(), BorderLayout.CENTER);
-        setContentPane(root);
+        setContentPane(src.ui.components.Motion.popIn(root));
     }
 
     private JPanel createRegistrationForm() {

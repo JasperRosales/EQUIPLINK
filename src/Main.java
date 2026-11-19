@@ -14,16 +14,33 @@ import src.service.BorrowRequestService;
 import src.service.EquipmentService;
 import src.service.NotificationService;
 import src.ui.LoginFrame;
+import src.ui.SplashWindow;
+import src.util.AppInfo;
+import src.util.Updater;
 import src.ui.UiSupport;
 
 import javax.swing.*;
 import java.sql.SQLException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
 
         SwingUtilities.invokeAndWait(src.ui.AppTheme::install);
+
+        // Splash plays the logo animation once while the database and update check run.
+        CountDownLatch animationDone = new CountDownLatch(1);
+        SplashWindow[] splash = new SplashWindow[1];
+        SwingUtilities.invokeAndWait(() -> {
+            splash[0] = new SplashWindow(animationDone::countDown);
+            splash[0].setVisible(true);
+        });
+        CompletableFuture<Updater.Release> update = CompletableFuture
+                .supplyAsync(Updater::check)
+                .completeOnTimeout(null, 15, TimeUnit.SECONDS);
 
         try {
 
@@ -33,7 +50,27 @@ public class Main {
 
             System.out.println("EquipLink is ready.");
 
-            SwingUtilities.invokeLater(() -> {
+        } catch (SQLException exception) {
+
+            exception.printStackTrace();
+            animationDone.await();
+            SwingUtilities.invokeAndWait(() -> splash[0].dispose());
+
+            UiSupport.showMessageDialog(
+                    null,
+                    "Unable to initialize EquipLink database.\n"
+                            + exception.getMessage(),
+                    "Database Error",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        animationDone.await();
+        Updater.Release release = update.join();
+
+        SwingUtilities.invokeLater(() -> {
+            Runnable openLogin = () -> {
+                splash[0].dispose();
 
                 AuthService authService = new AuthService();
 
@@ -48,19 +85,50 @@ public class Main {
 
                 showLogin(authController, requestController, equipmentController,
                         notificationController);
-            });
+            };
+            if (release == null) {
+                openLogin.run();
+            } else {
+                offerUpdate(release, splash[0], openLogin);
+            }
+        });
+    }
 
-        } catch (SQLException exception) {
-
-            exception.printStackTrace();
-
-            UiSupport.showMessageDialog(
-                    null,
-                    "Unable to initialize EquipLink database.\n"
-                            + exception.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE);
+    /** Asks to install a newer release; installs and exits, or continues to login. */
+    private static void offerUpdate(Updater.Release release, SplashWindow splash, Runnable skip) {
+        int choice = JOptionPane.showOptionDialog(
+                splash,
+                "EquipLink " + release.version() + " is available (you have "
+                        + AppInfo.version() + ").\nInstall it now? EquipLink will restart.",
+                "Update available",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.INFORMATION_MESSAGE,
+                null,
+                new Object[] { "Update now", "Later" },
+                "Update now");
+        if (choice != 0) {
+            skip.run();
+            return;
         }
+        splash.setStatus("Downloading EquipLink " + release.version() + "...");
+        Thread worker = new Thread(() -> {
+            try {
+                Updater.downloadAndInstall(release);
+                System.exit(0);
+            } catch (Exception exception) {
+                exception.printStackTrace();
+                SwingUtilities.invokeLater(() -> {
+                    UiSupport.showMessageDialog(
+                            splash,
+                            "The update could not be installed.\n" + exception.getMessage(),
+                            "Update failed",
+                            JOptionPane.WARNING_MESSAGE);
+                    skip.run();
+                });
+            }
+        }, "equiplink-updater");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private static void showLogin(
@@ -87,6 +155,10 @@ public class Main {
                 equipmentController, notificationController);
         JFrame frame = new JFrame("EquipLink | " + user.getRole());
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        javax.swing.ImageIcon windowIcon = src.ui.BrandLogo.icon(64);
+        if (windowIcon != null) {
+            frame.setIconImage(windowIcon.getImage());
+        }
         frame.setMinimumSize(new java.awt.Dimension(960, 640));
         frame.setSize(1280, 800);
         frame.setLocationRelativeTo(null);
